@@ -492,9 +492,11 @@ export default function App() {
       <div className="gnb-inner">
         <a href="#" className="brand" title="검수 페이지로"
            onClick={(e) => { e.preventDefault(); setView("upload"); }}>
-          {branding.wordmark.map((p, i) => (
-            <span key={i} style={{ color: p.color }}>{p.text}</span>
-          ))}
+          {branding.logo
+            ? <img className="brand-logo" src={branding.logo} alt={branding.name} />
+            : branding.wordmark.map((p, i) => (
+                <span key={i} style={{ color: p.color }}>{p.text}</span>
+              ))}
         </a>
         <a href="#" className={view === "upload" ? "on" : ""}
            onClick={(e) => { e.preventDefault(); setView("upload"); }}>검수</a>

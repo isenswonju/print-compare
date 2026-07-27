@@ -10,7 +10,8 @@ export interface BrandMark {
 
 export interface Branding {
   name: string;          // 서비스명 (document.title 등)
-  wordmark: BrandMark[]; // 헤더 로고(워드마크) 조각
+  wordmark: BrandMark[]; // 헤더 로고(워드마크) 조각 — logo 이미지가 없을 때 사용
+  logo?: string;         // 헤더 로고 이미지 URL(설정 시 워드마크 대신 이미지 표시)
 }
 
 export const branding: Branding = {

@@ -51,6 +51,7 @@ a { color: var(--red); }
   font-weight: 800; font-size: 1.25rem; margin-right: 10px; letter-spacing: -0.02em;
 }
 .gnb .brand span { line-height: 1; }       /* 색은 branding.ts에서 인라인 지정 */
+.gnb .brand .brand-logo { height: 22px; display: block; }  /* 로고 이미지 사용 시 */
 .gnb .brand:hover { opacity: 0.85; }
 .gnb a {
   text-decoration: none;

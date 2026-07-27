@@ -36,6 +36,7 @@ export default function App() {
   const [adminBusy, setAdminBusy] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [adminData, setAdminData] = useState<{ count: number; items: any[] } | null>(null);
+  const authedPwRef = useRef("");  // 로그인 후 목록 새로고침에 재사용(메모리만)
   const [pairs, setPairs] = useState<Pair[]>(
     [{ id: ++pairSeq, ref: [], test: [] }]);
   const [useOcr, setUseOcr] = useState(true);
@@ -341,21 +342,25 @@ export default function App() {
   }
 
   // 관리자 조회 — 비번을 수집기 서버로 보내 대조한 뒤 목록을 받아온다.
-  async function submitAdmin(e?: React.FormEvent) {
+  async function submitAdmin(e?: React.FormEvent, pw?: string) {
     e?.preventDefault();
     const adminUrl = branding.feedback?.adminUrl;
     if (!adminUrl) return;
+    // 로그인 시엔 입력값(adminPw), 목록 새로고침 시엔 인증된 비번(ref) 사용.
+    const password = pw ?? adminPw;
+    if (!password) return;
     setAdminBusy(true);
     setAdminErr("");
     try {
       const r = await fetch(adminUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: adminPw }),
+        body: JSON.stringify({ password }),
       });
       if (r.status === 401) { setAdminErr("비밀번호가 올바르지 않습니다."); return; }
       if (!r.ok) { setAdminErr(`오류: ${r.status}`); return; }
       const data = await r.json();
+      authedPwRef.current = password;   // 세션 동안만 메모리에 보관(비저장)
       setAdminData(data);
       setAdminOpen(false);
       setAdminPw("");
@@ -637,7 +642,8 @@ export default function App() {
           <div className="admin-head">
             <h2>수집된 피드백 <span className="admin-count">{adminData?.count ?? items.length}건</span></h2>
             <div className="admin-head-actions">
-              <button className="rm" onClick={() => submitAdmin()}
+              <button className="rm"
+                      onClick={() => submitAdmin(undefined, authedPwRef.current)}
                       disabled={adminBusy}>새로고침</button>
               <button className="rm" onClick={() => setView("upload")}>닫기</button>
             </div>

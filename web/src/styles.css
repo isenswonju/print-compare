@@ -8,6 +8,9 @@
   --card: #ffffff;
 }
 * { box-sizing: border-box; }
+/* 스크롤바 폭을 항상 예약 — 결과(긴)↔검수(짧은) 페이지 전환 시 세로 스크롤바
+   유무로 뷰포트 폭이 바뀌어 가운데 정렬 레이아웃이 튀는 것을 막는다. */
+html { scrollbar-gutter: stable; }
 body {
   font-family: "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   color: var(--ink);

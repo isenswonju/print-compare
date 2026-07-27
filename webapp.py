@@ -30,11 +30,8 @@ FEEDBACK_DIR = BASE / "feedback"
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 피드백에 원본 이미지 포함
 
-# 정적 배포본(다른 도메인)에서 /feedback으로 CORS 전송을 허용할 오리진.
-# 환경변수 FEEDBACK_ALLOWED_ORIGINS(콤마 구분)로 배포별 지정. 기본은 없음.
 FEEDBACK_ALLOWED_ORIGINS = {
-    o.strip() for o in os.environ.get("FEEDBACK_ALLOWED_ORIGINS", "").split(",")
-    if o.strip()
+    "https://i-sens-artwork-compare.static.hf.space",
 }
 
 

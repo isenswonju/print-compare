@@ -333,6 +333,18 @@ button.rm:disabled { opacity: 0.4; cursor: default; }
   font-size: 0.72rem;
   color: #8a8f98;
 }
+/* 세트 이름 편집(더블클릭/✎) */
+.setname.editable { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.setname-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-edit {
+  flex: none; border: 0; background: none; cursor: pointer; color: #c7ccd3;
+  font-size: 0.75rem; padding: 0 2px; line-height: 1;
+}
+.set-edit:hover { color: var(--red); }
+.set-rename {
+  width: 100%; min-width: 0; font-family: inherit; font-size: 0.86rem;
+  padding: 2px 6px; border: 1px solid var(--red); border-radius: 6px;
+}
 /* 세트별 피드백 상세 행 — 클릭 시 해당 피드백 모달 오픈 */
 .fbrow {
   display: flex;

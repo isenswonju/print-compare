@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  boxesIntersect, computeDefects, computeFeedbackEndpoints, csvEsc,
-  displayCsv, feedbackCsv, fmtDateTime, fmtMB, mapDisplay, sevCounts,
+  applySetName, boxesIntersect, computeDefects, computeFeedbackEndpoints,
+  csvEsc, displayCsv, feedbackCsv, fmtDateTime, fmtMB, mapDisplay, sevCounts,
   slimPayload, type FeedbackPayload,
 } from "./lib.ts";
 import type { DispFinding, Finding, ResultItem } from "./types.ts";
@@ -15,6 +15,28 @@ describe("fmtMB", () => {
   it("바이트를 MB로", () => {
     expect(fmtMB(1024 * 1024)).toBe("1.0MB");
     expect(fmtMB(1.5 * 1024 * 1024)).toBe("1.5MB");
+  });
+});
+
+describe("applySetName — 세트 이름 변경(그 세트의 모든 페이지에 적용)", () => {
+  const mk = (setId: number, page: number, name: string) =>
+    ({ name, setId, page, pageCount: 2 }) as ResultItem;
+  const results: ResultItem[] = [
+    mk(1, 1, "세트 1"), mk(1, 2, "세트 1"), mk(2, 1, "세트 2"),
+  ];
+
+  it("같은 setId의 모든 페이지 이름을 바꾼다", () => {
+    const out = applySetName(results, 1, "케어센스 라벨");
+    expect(out.filter((r) => r.setId === 1).map((r) => r.name))
+      .toEqual(["케어센스 라벨", "케어센스 라벨"]);
+  });
+  it("다른 세트는 건드리지 않는다", () => {
+    const out = applySetName(results, 1, "케어센스 라벨");
+    expect(out.find((r) => r.setId === 2)!.name).toBe("세트 2");
+  });
+  it("원본 배열을 변형하지 않는다(불변)", () => {
+    applySetName(results, 1, "X");
+    expect(results[0].name).toBe("세트 1");
   });
 });
 

@@ -8,9 +8,10 @@ import { clearSession, createSection, deleteArtwork, deleteSection,
          type ArtworkEntry, type Section, type StoredSet } from "./cache.ts";
 import { MultiDropZone, FeedbackModal, ResultDetail,
          type ModalState } from "./components.tsx";
-import { buildFeedbackPayload, download, feedbackCsv, flushFbQueue, fmtDateTime,
-         fmtMB, hasFeedbackEndpoint, loadFbQueue, restoreResults, saveFbQueue,
-         serializeResults, slimPayload, trySendFeedback } from "./lib.ts";
+import { applySetName, buildFeedbackPayload, download, feedbackCsv, flushFbQueue,
+         fmtDateTime, fmtMB, hasFeedbackEndpoint, loadFbQueue, restoreResults,
+         saveFbQueue, serializeResults, slimPayload,
+         trySendFeedback } from "./lib.ts";
 import { runAll, type RunSet } from "./runner.ts";
 import { ensureRasterPages } from "./pipeline/pdf.ts";
 import { branding } from "./branding.ts";
@@ -23,11 +24,6 @@ interface Pair { id: number; ref: FileEntry[]; test: FileEntry[]; }
 const pageCount = (side: FileEntry[]) =>
   side.reduce((s, e) => s + e.pages.length, 0);
 const flatPages = (side: FileEntry[]) => side.flatMap((e) => e.pages);
-// 세트 이름 = 원본 첫 파일명(확장자 제외). 없으면 인쇄물, 그래도 없으면 세트N.
-const setName = (p: Pair, idx: number) => {
-  const base = p.ref[0]?.name ?? p.test[0]?.name;
-  return base ? base.replace(/\.[^.]+$/, "") : `세트 ${idx + 1}`;
-};
 
 let pairSeq = 0;
 
@@ -54,6 +50,7 @@ export default function App() {
   const [sectionDraft, setSectionDraft] = useState("");
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [dragOverSec, setDragOverSec] = useState<string | null>(null);
+  const [editingSet, setEditingSet] = useState<number | null>(null); // 이름 편집 중인 setId
   const [restored, setRestored] = useState(false);
   // 분석 수행 시각 — 결과가 7일 보존되므로 언제 분석한 것인지 표시한다
   const [analyzedAt, setAnalyzedAt] = useState<number | null>(null);
@@ -251,7 +248,7 @@ export default function App() {
     try {
       const sets: RunSet[] = completePairs.map((p, i) => ({
         setId: p.id,
-        name: setName(p, pairs.indexOf(p) >= 0 ? pairs.indexOf(p) : i),
+        name: `세트 ${i + 1}`, // 기본 이름(사용자가 결과에서 수정 가능)
         refPages: flatPages(p.ref),
         testPages: flatPages(p.test),
       }));
@@ -390,6 +387,40 @@ export default function App() {
   });
   const setCount = groups.length;
 
+  // 세트 이름 변경 — 해당 세트의 모든 페이지에 반영하고 세션에도 보존.
+  const renameSet = (setId: number, name: string) => {
+    setEditingSet(null);
+    const nm = name.trim();
+    if (!nm) return;
+    setResults((rs) => applySetName(rs, setId, nm));
+    const stored = storedRef.current;
+    if (stored) {
+      storedRef.current = stored.map((s) => (s.setId === setId ? { ...s, name: nm } : s));
+      saveSession(storedRef.current, analyzedAtRef.current ?? Date.now());
+    }
+  };
+
+  // 세트 이름 라벨(편집 가능) — 더블클릭 또는 ✎ 버튼으로 편집. 부모가 <div>여야
+  // 함(버튼/인풋 중첩 방지). title로 원본 파일명 노출.
+  const renderSetLabel = (setId: number, label: string, fileName?: string) =>
+    editingSet === setId ? (
+      <input className="set-rename" autoFocus defaultValue={label}
+        onClick={(e) => e.stopPropagation()}
+        onBlur={(e) => renameSet(setId, e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") renameSet(setId, e.currentTarget.value);
+          if (e.key === "Escape") setEditingSet(null);
+        }} />
+    ) : (
+      <span className="setname editable" title={fileName}
+            onDoubleClick={(e) => { e.stopPropagation(); setEditingSet(setId); }}>
+        <span className="setname-text">{label}</span>
+        <button type="button" className="set-edit" title="이름 변경"
+                onClick={(e) => { e.stopPropagation(); setEditingSet(setId); }}>✎</button>
+      </span>
+    );
+
   // 한 페이지 결과 항목(헤드 + 피드백 상세 + 전송). multi면 "페이지 N"으로 표기.
   const renderPageItem = (item: ResultItem, gi: number, multi: boolean) => {
     const nDef = item.defects?.length ?? 0;
@@ -419,16 +450,22 @@ export default function App() {
     return (
       <div key={item.setId + "-" + item.page}
            className={"setitem" + (gi === selected ? " on" : "") + (multi ? " page" : "")}>
-        <button type="button" className="sethead" onClick={() => setSelected(gi)}>
+        <div className="sethead" role="button" tabIndex={0}
+             onClick={() => setSelected(gi)}
+             onKeyDown={(e) => {
+               if (e.key === "Enter" || e.key === " ") {
+                 e.preventDefault(); setSelected(gi);
+               }
+             }}>
           <span className="sethead-main">
-            <span className="setname">
-              {multi ? `페이지 ${item.page}` : item.name}
-            </span>
+            {multi
+              ? <span className="setname">페이지 {item.page}</span>
+              : renderSetLabel(item.setId, item.name, item.refFile?.name)}
             {!multi && analyzedAt && (
               <span className="setdate">{fmtDateTime(analyzedAt)}</span>)}
           </span>
           {badge}
-        </button>
+        </div>
         {fbEntries.map((e) => (
           <button type="button" key={e.key} className="fbrow"
                   onClick={() => { setSelected(gi); setModalState({ idx: rIdx, m: e.m }); }}>
@@ -524,7 +561,8 @@ export default function App() {
                       <div key={g.setId} className="setgroup">
                         <div className="grouphead">
                           <span className="sethead-main">
-                            <span className="setname">{g.name}</span>
+                            {renderSetLabel(g.setId, g.name,
+                              g.items[0].item.refFile?.name)}
                             {analyzedAt && (
                               <span className="setdate">
                                 {fmtDateTime(analyzedAt)} · {g.items.length}장</span>)}

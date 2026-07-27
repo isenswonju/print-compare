@@ -19,3 +19,7 @@ __pycache__/
 feedback/*.jsonl
 feedback/images/*
 webjobs/
+
+# 생성 산출물·비공개 케이스(실물 라벨 이미지)는 저장소에 넣지 않는다
+bench/out/
+private/bench-cases/

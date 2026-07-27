@@ -1,5 +1,6 @@
 // 화면·데이터 헬퍼: 이미지 변환, 표시 매핑, CSV, 확대경, 피드백 전송/보관 큐.
 import type { StoredSet } from "./cache.ts";
+import { branding } from "./branding.ts";
 import { defaultConfig } from "./pipeline/config.ts";
 import { wordsFromTesseract } from "./pipeline/ocr.ts";
 import type { BBox, Disp, DispFinding, Finding, ImageDataLike, ResultItem,
@@ -258,14 +259,20 @@ export function feedbackCsv(results: ResultItem[]): string {
 // 피드백은 맥미니 서버(feedback/feedback.jsonl)에 축적되어 오탐 튜닝의 입력이
 // 된다. 문제 부위 크롭 + 엔진 분석 데이터 + 원본 이미지(사용자 승인)를 보낸다.
 export const APP_VERSION = "2026-07-24.3";
-// 사내망(/app/)에서 열었을 때만 같은 서버(/feedback)로 수집된다.
-// 외부(HF 정적 배포)에서는 수집 서버 경로가 없으므로(Tailscale Funnel 폐지,
-// 2026-07-24) 파일 저장 폴백으로 동작한다.
+// same-origin 폴백: /app/이면 같은 서버 /feedback, hf.space 정적이면 없음.
 export function computeFeedbackEndpoints(hostname: string): string[] {
   return hostname.endsWith("hf.space") ? [] : ["/feedback"];
 }
 
-const FEEDBACK_ENDPOINTS = computeFeedbackEndpoints(location.hostname);
+// 전송 대상: 외부 수집기(collectUrl)가 있으면 어디서든 그리로, 없으면 폴백.
+export function feedbackTargets(
+  collectUrl: string | undefined, hostname: string): string[] {
+  if (collectUrl) return [collectUrl];
+  return computeFeedbackEndpoints(hostname);
+}
+
+const FEEDBACK_ENDPOINTS = feedbackTargets(
+  branding.feedback?.collectUrl, location.hostname);
 
 export const hasFeedbackEndpoint = FEEDBACK_ENDPOINTS.length > 0;
 
@@ -316,9 +323,11 @@ export async function buildFeedbackPayload(
            sentAt: new Date().toISOString(), origin: location.origin, items };
 }
 
-export async function trySendFeedback(payload: FeedbackPayload): Promise<string | null> {
+export async function trySendFeedback(
+  payload: FeedbackPayload,
+  targets: string[] = FEEDBACK_ENDPOINTS): Promise<string | null> {
   const body = JSON.stringify(payload);
-  for (const url of FEEDBACK_ENDPOINTS) {
+  for (const url of targets) {
     try {
       const r = await fetch(url, {
         method: "POST",

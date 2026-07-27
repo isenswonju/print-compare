@@ -596,3 +596,64 @@ details summary { cursor: pointer; }
 .artname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artsize { flex: none; color: #aaa; font-size: 0.74rem; }
 .inspect-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* ---- 관리자(피드백 조회) ---- */
+.gnb-admin {
+  margin-left: auto;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  padding: 3px 9px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.gnb-status + .gnb-admin { margin-left: 12px; }
+.gnb-admin:hover { border-color: var(--red); }
+.admin-modal { width: min(360px, 92vw); }
+.admin-hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 12px; }
+.admin-pw {
+  width: 100%; box-sizing: border-box;
+  border: 1px solid #ccc; border-radius: 8px;
+  padding: 9px 11px; font-size: 0.95rem;
+}
+.admin-err { color: var(--red); font-size: 0.85rem; margin: 8px 0 0; }
+.admin-shell { display: flex; flex-direction: column; gap: 14px; }
+.admin-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.admin-head h2 { margin: 0; font-size: 1.15rem; }
+.admin-count { color: var(--red); font-weight: 800; margin-left: 6px; }
+.admin-head-actions { display: flex; gap: 8px; }
+.admin-empty { color: var(--muted); padding: 24px 0; text-align: center; }
+.admin-entry {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 12px; padding: 14px 16px;
+}
+.admin-entry-head {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 10px;
+}
+.admin-origin { color: var(--muted); font-size: 0.8rem; }
+.admin-ver { color: #aaa; font-size: 0.78rem; margin-left: auto; }
+.admin-set { margin: 8px 0; }
+.admin-set-name { font-weight: 700; font-size: 0.9rem; margin-bottom: 6px; }
+.admin-fb {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 0; border-top: 1px dashed var(--line); font-size: 0.85rem;
+}
+.admin-tag {
+  flex: none; border-radius: 6px; padding: 1px 7px;
+  font-size: 0.72rem; font-weight: 800; color: #fff;
+}
+.admin-tag.tp { background: var(--red); }
+.admin-tag.fp { background: #e08e0b; }
+.admin-tag.miss { background: var(--muted); }
+.admin-ktype { font-weight: 600; }
+.admin-cause, .admin-comment { color: var(--muted); }
+.admin-crop {
+  height: 56px; width: auto; border: 1px solid var(--line);
+  border-radius: 6px; image-rendering: pixelated;
+}
+.admin-empty-set { color: #aaa; font-size: 0.8rem; }

@@ -1,8 +1,6 @@
-// 브랜딩 설정 레이어 — 이 파일이 upstream(브랜드중립 Inkspect)과 downstream
-// (i-SENS)의 유일한 차이점이 되도록 격리한다. 기능 코드는 여기만 참조하고,
-// upstream 패치는 이 파일을 건드리지 않으므로 머지가 깨끗하다.
-//
-// === 이 버전: i-SENS 전용(downstream) ===
+// i-SENS 전용 앱 설정. i-SENS와 Inkspect는 이제 별개 제품으로 진행하며 분석
+// 엔진(compare_artwork.py / pipeline / engine.ts)만 공유한다. UI·브랜드·수집기는
+// 각자 독립. (upstream 전체 머지 금지 — 엔진 파일만 선별 동기화)
 import isensLogo from "./assets/isens-logo.png";
 
 export interface BrandMark {
@@ -14,6 +12,9 @@ export interface Branding {
   name: string;          // 서비스명 (document.title 등)
   wordmark: BrandMark[]; // 헤더 로고(워드마크) 조각 — logo 이미지가 없을 때 사용
   logo?: string;         // 헤더 로고 이미지 URL(설정 시 워드마크 대신 이미지 표시)
+  // 피드백 서버리스 수집기. 사내망·정적 배포 어디서든 여기로 수집되고,
+  // adminUrl로 헤더 관리자 입구를 노출한다(비번은 수집기 서버 env).
+  feedback?: { collectUrl?: string; adminUrl?: string };
 }
 
 export const branding: Branding = {
@@ -25,4 +26,8 @@ export const branding: Branding = {
     { text: "i", color: "#78be20" },
     { text: "-SENS", color: "#171c8f" },
   ],
+  feedback: {
+    collectUrl: "https://inkspect-feedback.vercel.app/api/feedback",
+    adminUrl: "https://inkspect-feedback.vercel.app/api/admin",
+  },
 };

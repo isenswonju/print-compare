@@ -28,7 +28,14 @@ const flatPages = (side: FileEntry[]) => side.flatMap((e) => e.pages);
 let pairSeq = 0;
 
 export default function App() {
-  const [view, setView] = useState<"upload" | "results">("upload");
+  const [view, setView] = useState<"upload" | "results" | "admin">("upload");
+  // 관리자(피드백 조회) — 비번은 앱에 저장하지 않고 수집기 서버가 대조.
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [adminPw, setAdminPw] = useState("");
+  const [adminErr, setAdminErr] = useState("");
+  const [adminBusy, setAdminBusy] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [adminData, setAdminData] = useState<{ count: number; items: any[] } | null>(null);
   const [pairs, setPairs] = useState<Pair[]>(
     [{ id: ++pairSeq, ref: [], test: [] }]);
   const [useOcr, setUseOcr] = useState(true);
@@ -308,26 +315,55 @@ export default function App() {
     };
     try {
       const payload = await buildFeedbackPayload([item]);
-      // 외부(HF) 배포에서는 수집 서버가 없다 — 바로 파일 저장 안내
+      // 수집기에는 slim(결함 크롭+메타)만 보낸다 — 전체 라벨 원본은
+      // 브라우저 밖으로 내보내지 않는다.
+      const slim = slimPayload(payload);
+      // 수집기 경로가 없으면(엔드포인트 미설정) 파일 저장 안내
       if (!hasFeedbackEndpoint) {
-        saveAsFile(payload);
+        saveAsFile(slim);
         return;
       }
-      const url = await trySendFeedback(payload);
+      const url = await trySendFeedback(slim);
       if (url) {
         setStatus("전송 완료 ✓");
         return;
       }
-      // 서버(맥미니)가 꺼져 있음 — 원본 이미지는 빼고 브라우저에 보관했다가
-      // 다음 방문 때 자동 재전송. 보관도 실패하면 파일로 저장.
-      const slim = slimPayload(payload);
+      // 수집기 연결 불가 — 브라우저에 보관했다가 다음 방문 때 자동 재전송.
+      // 보관도 실패하면 파일로 저장.
       const q = loadFbQueue();
       q.push(slim);
       if (saveFbQueue(q))
         setStatus("서버 연결 불가 — 브라우저에 보관됨, 다음 방문 시 자동 전송");
-      else saveAsFile(payload);
+      else saveAsFile(slim);
     } finally {
       setSendingIdx(null);
+    }
+  }
+
+  // 관리자 조회 — 비번을 수집기 서버로 보내 대조한 뒤 목록을 받아온다.
+  async function submitAdmin(e?: React.FormEvent) {
+    e?.preventDefault();
+    const adminUrl = branding.feedback?.adminUrl;
+    if (!adminUrl) return;
+    setAdminBusy(true);
+    setAdminErr("");
+    try {
+      const r = await fetch(adminUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: adminPw }),
+      });
+      if (r.status === 401) { setAdminErr("비밀번호가 올바르지 않습니다."); return; }
+      if (!r.ok) { setAdminErr(`오류: ${r.status}`); return; }
+      const data = await r.json();
+      setAdminData(data);
+      setAdminOpen(false);
+      setAdminPw("");
+      setView("admin");
+    } catch {
+      setAdminErr("수집기에 연결할 수 없습니다.");
+    } finally {
+      setAdminBusy(false);
     }
   }
 
@@ -508,9 +544,111 @@ export default function App() {
             <span className="spin" />{stageText || "분석 중"} · {elapsed}초
           </span>
         )}
+        {branding.feedback?.adminUrl && (
+          <button className="gnb-admin" title="관리자 — 피드백 조회"
+                  onClick={() => { setAdminErr(""); setAdminOpen(true); }}>🔒</button>
+        )}
       </div>
     </nav>
   );
+
+  // 관리자 로그인 모달 — 비번은 상태에만, 앱 번들에 저장하지 않는다.
+  const adminModal = adminOpen && (
+    <div className="modal-back" onClick={() => setAdminOpen(false)}>
+      <form className="modal admin-modal" onClick={(e) => e.stopPropagation()}
+            onSubmit={submitAdmin}>
+        <h3>관리자 로그인</h3>
+        <p className="admin-hint">피드백 조회를 위해 비밀번호를 입력하세요.</p>
+        <input className="admin-pw" type="password" autoFocus
+               placeholder="비밀번호" value={adminPw}
+               onChange={(e) => setAdminPw(e.target.value)} />
+        {adminErr && <p className="admin-err">{adminErr}</p>}
+        <div className="modal-btns">
+          <span style={{ flex: 1 }} />
+          <button type="button" className="rm"
+                  onClick={() => setAdminOpen(false)}>취소</button>
+          <button type="submit" className="go save" disabled={adminBusy}>
+            {adminBusy ? "확인 중…" : "로그인"}</button>
+        </div>
+      </form>
+    </div>
+  );
+
+  // 수집된 피드백 1건(제출 단위) 렌더 — 세트별 결함/누락과 크롭 이미지.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderAdminEntry = (entry: any, i: number) => {
+    const data = entry?.data ?? {};
+    const when = entry?.received || entry?.uploadedAt;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sets: any[] = Array.isArray(data.items) ? data.items : [];
+    return (
+      <div className="admin-entry" key={entry?.pathname || i}>
+        <div className="admin-entry-head">
+          <b>{when ? new Date(when).toLocaleString("ko-KR") : "시간 미상"}</b>
+          <span className="admin-origin">{entry?.origin || data.origin || ""}</span>
+          <span className="admin-ver">v{data.version || "?"}</span>
+        </div>
+        {sets.map((s, si) => {
+          const fb = s?.feedback ?? {};
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const defects: any[] = Array.isArray(fb.defects) ? fb.defects : [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const missed: any[] = Array.isArray(fb.missed) ? fb.missed : [];
+          return (
+            <div className="admin-set" key={si}>
+              <div className="admin-set-name">{s?.set || `세트 ${si + 1}`}</div>
+              {defects.map((d, di) => (
+                <div className="admin-fb" key={`d${di}`}>
+                  <span className={`admin-tag ${d.fp ? "fp" : "tp"}`}>
+                    {d.fp ? "오탐" : "정탐"}</span>
+                  <span className="admin-ktype">{d.ktype || d.type || "결함"}</span>
+                  {d.cause && <span className="admin-cause">· {d.cause}</span>}
+                  {d.comment && <span className="admin-comment">“{d.comment}”</span>}
+                  {d.refCrop && <img className="admin-crop" src={d.refCrop} alt="원본" />}
+                  {d.testCrop && <img className="admin-crop" src={d.testCrop} alt="인쇄물" />}
+                </div>
+              ))}
+              {missed.map((m, mi) => (
+                <div className="admin-fb" key={`m${mi}`}>
+                  <span className="admin-tag miss">미검출</span>
+                  {m.comment && <span className="admin-comment">“{m.comment}”</span>}
+                  {m.refCrop && <img className="admin-crop" src={m.refCrop} alt="원본" />}
+                  {m.testCrop && <img className="admin-crop" src={m.testCrop} alt="인쇄물" />}
+                </div>
+              ))}
+              {!defects.length && !missed.length && (
+                <div className="admin-empty-set">표시할 항목 없음</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ---------------------------------------------------------------- 관리자 페이지
+  if (view === "admin") {
+    const items = adminData?.items ?? [];
+    return (
+      <>
+        {gnb}
+        {adminModal}
+        <div className="shell admin-shell">
+          <div className="admin-head">
+            <h2>수집된 피드백 <span className="admin-count">{adminData?.count ?? items.length}건</span></h2>
+            <div className="admin-head-actions">
+              <button className="rm" onClick={() => submitAdmin()}
+                      disabled={adminBusy}>새로고침</button>
+              <button className="rm" onClick={() => setView("upload")}>닫기</button>
+            </div>
+          </div>
+          {items.length === 0
+            ? <p className="admin-empty">아직 수집된 피드백이 없습니다.</p>
+            : items.map(renderAdminEntry)}
+        </div>
+      </>
+    );
+  }
 
   // ---------------------------------------------------------------- 결과 페이지
   if (view === "results") {
@@ -518,6 +656,7 @@ export default function App() {
     return (
       <>
         {gnb}
+        {adminModal}
         <div className="shell">
           {loaded.length === 0 ? (
             <p className="note">아직 분석 결과가 없습니다. 검수 탭에서 이미지를
@@ -623,6 +762,7 @@ export default function App() {
   return (
     <>
       {gnb}
+      {adminModal}
       <div className="shell">
         <div className="inspect">
           <aside className="artlib card">

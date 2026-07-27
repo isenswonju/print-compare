@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   applySetName, boxesIntersect, computeDefects, computeFeedbackEndpoints,
-  csvEsc, displayCsv, feedbackCsv, fmtDateTime, fmtMB, mapDisplay, sevCounts,
-  slimPayload, type FeedbackPayload,
+  csvEsc, displayCsv, feedbackCsv, feedbackTargets, fmtDateTime, fmtMB,
+  mapDisplay, sevCounts, slimPayload, type FeedbackPayload,
 } from "./lib.ts";
 import type { DispFinding, Finding, ResultItem } from "./types.ts";
 
@@ -129,6 +129,19 @@ describe("computeFeedbackEndpoints", () => {
   it("사내망 호스트는 /feedback", () => {
     expect(computeFeedbackEndpoints("192.168.24.23")).toEqual(["/feedback"]);
     expect(computeFeedbackEndpoints("localhost")).toEqual(["/feedback"]);
+  });
+});
+
+describe("feedbackTargets", () => {
+  it("수집기 URL이 있으면 호스트와 무관하게 그리로만 보낸다", () => {
+    const url = "https://inkspect-feedback.vercel.app/api/feedback";
+    expect(feedbackTargets(url, "i-sens-artwork-compare.static.hf.space"))
+      .toEqual([url]);
+    expect(feedbackTargets(url, "192.168.24.23")).toEqual([url]);
+  });
+  it("수집기 URL이 없으면 same-origin 폴백으로 되돌아간다", () => {
+    expect(feedbackTargets(undefined, "localhost")).toEqual(["/feedback"]);
+    expect(feedbackTargets(undefined, "x.hf.space")).toEqual([]);
   });
 });
 

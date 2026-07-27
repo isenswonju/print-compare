@@ -34,23 +34,32 @@ describe("피드백 보류 큐 (서버 꺼져 있을 때 브라우저 보관)", 
   });
 });
 
+// 브랜딩(수집기 URL)과 무관하게 전송 메커니즘만 검증 — 명시적 targets 사용.
 describe("trySendFeedback (서버 전송)", () => {
   it("서버 200이면 전송된 엔드포인트 URL을 반환", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchMock);
-    expect(await trySendFeedback(payload(1))).toBe("/feedback");
+    expect(await trySendFeedback(payload(1), ["/feedback"])).toBe("/feedback");
     expect(fetchMock).toHaveBeenCalledWith("/feedback", expect.objectContaining({
       method: "POST",
       headers: { "Content-Type": "application/json" },
     }));
   });
+  it("여러 대상 중 첫 성공 URL을 반환하고 이후는 시도하지 않는다", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await trySendFeedback(payload(1), ["/a", "/b", "/c"])).toBe("/b");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
   it("서버가 실패(4xx/5xx)면 null", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
-    expect(await trySendFeedback(payload(1))).toBeNull();
+    expect(await trySendFeedback(payload(1), ["/feedback"])).toBeNull();
   });
   it("네트워크 예외도 삼켜 null 반환(전송 시도 자체가 앱을 깨면 안 됨)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net down")));
-    expect(await trySendFeedback(payload(1))).toBeNull();
+    expect(await trySendFeedback(payload(1), ["/feedback"])).toBeNull();
   });
 });
 

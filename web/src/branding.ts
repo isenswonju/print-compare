@@ -3,6 +3,8 @@
 // upstream 패치는 이 파일을 건드리지 않으므로 머지가 깨끗하다.
 //
 // === 이 버전: i-SENS 전용(downstream) ===
+import isensLogo from "./assets/isens-logo.png";
+
 export interface BrandMark {
   text: string;
   color: string; // hex
@@ -16,7 +18,9 @@ export interface Branding {
 
 export const branding: Branding = {
   name: "인쇄 검수 · i-SENS",
-  // i-SENS 워드마크: 그린 "i" + 네이비 "-SENS"
+  // 실제 i-SENS 로고 이미지(규정선 제거·투명 배경). 이미지가 있으면 헤더에 사용.
+  logo: isensLogo,
+  // 로고 로드 실패 시 폴백 워드마크: 그린 "i" + 네이비 "-SENS"
   wordmark: [
     { text: "i", color: "#78be20" },
     { text: "-SENS", color: "#171c8f" },

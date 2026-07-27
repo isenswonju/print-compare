@@ -47,7 +47,7 @@ a { color: var(--red); }
 /* i-SENS 워드마크(헤더 브랜드) — 클릭 시 검수 페이지로. 공식 로고 이미지가
    있으면 이 요소를 <img>로 교체하면 된다. */
 .gnb .brand {
-  display: inline-flex; align-items: baseline; text-decoration: none;
+  display: inline-flex; align-items: center; text-decoration: none;
   font-weight: 800; font-size: 1.25rem; margin-right: 10px; letter-spacing: -0.02em;
 }
 .gnb .brand span { line-height: 1; }       /* 색은 branding.ts에서 인라인 지정 */

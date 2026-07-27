@@ -1,0 +1,1140 @@
+#!/usr/bin/env python3
+"""compare_artwork.py — 인쇄 아트웍(REF) vs 실물 스캔(TEST) 결함 자동 검출.
+
+승인 아트웍 PNG(REF)와 실물 인쇄 스캔 PNG(TEST)를 정합·비교해 인쇄 결함을
+검출/분류하고 annotated.png, contact_sheet.png, findings.json/csv 를 생성한다.
+기본 동작은 100% 결정론적(OpenCV). --llm-verify 로 선택적 LLM 검증 훅 사용.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import difflib
+import json
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+# ---------------------------------------------------------------------------
+# 설정
+# ---------------------------------------------------------------------------
+
+REF_BASE_WIDTH = 5564  # min-area 기준 해상도
+
+
+@dataclass
+class Config:
+    tol: int = 5                    # 타일 정합 후 diff 팽창 허용치(px)
+    tol_fallback: int = 13          # 타일 정합 생략(폴백) 시 허용치
+    min_area: int = 60              # REF 폭 5564px 기준 최소 diff 잉크 픽셀 수
+    use_ocr: bool = True
+    use_tile_refine: bool = True
+    llm_verify: bool = False
+    debug: bool = False
+
+    # 전역 정합
+    orb_features: int = 20000
+    lowe_ratio: float = 0.75
+    ransac_thresh: float = 3.0
+    min_inliers: int = 300
+    scale_range: tuple = (0.9, 1.1)
+    downscale_long: int = 2000
+
+    # 타일 정합
+    tile: int = 768
+    overlap: int = 128
+    min_response: float = 0.05
+    max_shift: float = 20.0
+
+    # 이진화
+    bg_kernel: int = 81
+    thresh_block: int = 41
+    thresh_c: int = 18
+
+    # 군집화
+    merge_kernel: int = 31
+    margin_ratio: float = 0.06      # 재단선/레지스터 마크 마진
+
+    # 망점(halftone) 오탐 억제 — 실측 튜닝값
+    # TP diff 픽셀 평균 밝기 ≤174, 망점/고스트 FP ≥206 (임계 190)
+    extra_max_norm: int = 190      # extra: diff 픽셀의 norm_TEST 평균이 이보다 밝으면 망점/고스트
+    missing_max_ref: int = 190     # missing: diff 픽셀의 REF 평균이 이보다 밝으면 회색 박스 톤 차이
+
+    # 리플로우(개정 줄 밀림) 억제 — diff 내용이 상대 이미지 근처에 그대로
+    # 존재하면(문맥 포함 템플릿 매칭) 결함이 아니라 줄 밀림으로 판정
+    reflow_search_y: int = 200     # REF 폭 5564 기준 세로 탐색 반경(px)
+    reflow_search_x: int = 60
+    reflow_pad: int = 48           # 매칭 문맥 패딩(px)
+    reflow_min_corr: float = 0.85
+    reflow_exclude: int = 12       # 이 변위 이내 매칭은 정상 정합(억제 대상 아님)
+    reflow_min_cover: float = 0.6  # diff 잉크가 변위 위치의 상대 잉크로 덮여야 하는 비율
+
+    # 뒷비침
+    ghost_lo: int = 150
+    ghost_hi: int = 225
+    ghost_blur: int = 7            # 망점 도트 제거용 median blur (획 폭 있는 고스트만 생존)
+    ghost_band_hi: int = 214       # blur 후 밴드 상한(회색 박스 평탄값 ~221 제외)
+    ghost_ref_white: int = 215     # REF 백색 기준(회색 박스 톤 210 제외)
+    ghost_ref_erode: int = 9
+    ghost_merge: int = 61
+    ghost_min_area: int = 800
+
+    # OCR
+    ocr_min_conf: int = 40
+
+
+@dataclass
+class Finding:
+    id: int = 0
+    type: str = ""       # extra | missing | showthrough | text_mismatch | trim_mark_expected | layout_reflow
+    severity: str = ""   # critical | major | minor | expected
+    bbox_ref: tuple = (0, 0, 0, 0)
+    area_px: int = 0
+    near_text: str = ""
+    note: str = ""
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "type": self.type,
+            "severity": self.severity,
+            "bbox_ref": [int(v) for v in self.bbox_ref],
+            "area_px": int(self.area_px),
+            "near_text": self.near_text,
+            "note": self.note,
+        }
+
+
+# ---------------------------------------------------------------------------
+# 한글 경로 안전 I/O
+# ---------------------------------------------------------------------------
+
+def _render_pdf_gray(path: Path, dpi: int = 600) -> np.ndarray:
+    """PDF 첫 페이지를 지정 dpi로 래스터화해 그레이스케일 ndarray로 반환.
+
+    브라우저판(web/src/pipeline/pdf.ts)과 동일하게 600dpi·흰 배경·첫 페이지.
+    시스템 의존성 없는 pypdfium2 사용(pip install pypdfium2).
+    """
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:
+        raise SystemExit(
+            "[에러] PDF 입력에는 pypdfium2가 필요합니다: pip install pypdfium2")
+    pdf = pdfium.PdfDocument(str(path))
+    try:
+        if len(pdf) == 0:
+            raise SystemExit(f"[에러] 페이지가 없는 PDF입니다: {path}")
+        page = pdf[0]
+        scale = dpi / 72.0
+        w_pt, h_pt = page.get_size()
+        longest = max(w_pt, h_pt) * scale
+        max_dim = 12000  # 과대 캔버스 방지(브라우저판과 동일 상한)
+        if longest > max_dim:
+            scale *= max_dim / longest
+        bitmap = page.render(scale=scale)
+        arr = bitmap.to_numpy()
+        mode = bitmap.mode  # 'RGB' | 'BGR' | 'RGBA' | 'BGRA' | 'L' ...
+        bitmap.close()
+        if arr.ndim == 2 or mode in ("L", "grey", "gray"):
+            return arr if arr.ndim == 2 else arr[:, :, 0]
+        chans = arr[:, :, :3].astype(np.float32)
+        if mode.startswith("BGR"):  # BGR(A) → RGB 순서로 정렬
+            chans = chans[:, :, ::-1]
+        if mode.endswith("A"):      # 알파를 흰 배경에 합성
+            a = arr[:, :, 3:4].astype(np.float32) / 255.0
+            chans = chans * a + 255.0 * (1.0 - a)
+        gray = cv2.cvtColor(chans.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        return gray
+    finally:
+        pdf.close()
+
+
+def imread_gray(path: Path) -> np.ndarray:
+    if path.suffix.lower() == ".pdf":
+        return _render_pdf_gray(path)
+    data = np.fromfile(str(path), dtype=np.uint8)
+    img = cv2.imdecode(data, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        raise SystemExit(f"[에러] 이미지를 열 수 없습니다: {path}")
+    return img
+
+
+def imwrite(path: Path, img: np.ndarray) -> None:
+    ok, buf = cv2.imencode(path.suffix or ".png", img)
+    if not ok:
+        raise RuntimeError(f"이미지 인코딩 실패: {path}")
+    buf.tofile(str(path))
+
+
+def ellipse(k: int) -> np.ndarray:
+    return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+
+
+# ---------------------------------------------------------------------------
+# 3.1 전역 정합
+# ---------------------------------------------------------------------------
+
+def global_align(ref: np.ndarray, test: np.ndarray, cfg: Config) -> np.ndarray:
+    """ORB + RANSAC homography로 TEST를 REF 좌표계로 warp."""
+
+    def downscale(img):
+        s = cfg.downscale_long / max(img.shape)
+        if s >= 1.0:
+            return img, 1.0
+        small = cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+        return small, s
+
+    ref_s, s_ref = downscale(ref)
+    test_s, s_test = downscale(test)
+
+    orb = cv2.ORB_create(nfeatures=cfg.orb_features)
+    kp_r, des_r = orb.detectAndCompute(ref_s, None)
+    kp_t, des_t = orb.detectAndCompute(test_s, None)
+    if des_r is None or des_t is None:
+        raise SystemExit("[에러] ORB 특징점 추출 실패 — 이미지 내용을 확인하세요.")
+
+    matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
+    knn = matcher.knnMatch(des_t, des_r, k=2)
+    good = [m for m, n in (p for p in knn if len(p) == 2)
+            if m.distance < cfg.lowe_ratio * n.distance]
+    if len(good) < 4:
+        raise SystemExit(f"[에러] 매칭 부족(good={len(good)}) — 정합 불가.")
+
+    src = np.float32([kp_t[m.queryIdx].pt for m in good]) / s_test
+    dst = np.float32([kp_r[m.trainIdx].pt for m in good]) / s_ref
+
+    H, mask = cv2.findHomography(src, dst, cv2.RANSAC,
+                                 ransacReprojThreshold=cfg.ransac_thresh)
+    if H is None:
+        raise SystemExit("[에러] homography 추정 실패.")
+    inliers = int(mask.sum())
+
+    Hn = H / H[2, 2]
+    sx = float(np.hypot(Hn[0, 0], Hn[1, 0]))
+    sy = float(np.hypot(Hn[0, 1], Hn[1, 1]))
+    lo, hi = cfg.scale_range
+    if inliers < cfg.min_inliers:
+        raise SystemExit(
+            f"[에러] 전역 정합 검증 실패: inlier={inliers} (< {cfg.min_inliers}). "
+            "입력 이미지 쌍이 동일 아트웍인지 확인하세요.")
+    if not (lo <= sx <= hi and lo <= sy <= hi):
+        raise SystemExit(
+            f"[에러] 전역 정합 검증 실패: 스케일 성분 sx={sx:.3f}, sy={sy:.3f} "
+            f"(허용 {lo}~{hi}).")
+
+    print(f"[정합] good match {len(good)}, inlier {inliers}, "
+          f"scale ({sx:.3f}, {sy:.3f})")
+
+    aligned = cv2.warpPerspective(test, H, (ref.shape[1], ref.shape[0]),
+                                  flags=cv2.INTER_LINEAR, borderValue=255)
+    return aligned
+
+
+# ---------------------------------------------------------------------------
+# 3.2 타일 국소 정밀 정합
+# ---------------------------------------------------------------------------
+
+def _fill_invalid(grid: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """무효 타일을 유효 이웃 중앙값으로 채움(반복)."""
+    grid = grid.copy()
+    valid = valid.copy()
+    ny, nx = grid.shape
+    for _ in range(max(ny, nx)):
+        if valid.all():
+            break
+        new_grid, new_valid = grid.copy(), valid.copy()
+        for i in range(ny):
+            for j in range(nx):
+                if valid[i, j]:
+                    continue
+                neigh = []
+                for di in (-1, 0, 1):
+                    for dj in (-1, 0, 1):
+                        ii, jj = i + di, j + dj
+                        if 0 <= ii < ny and 0 <= jj < nx and valid[ii, jj]:
+                            neigh.append(grid[ii, jj])
+                if neigh:
+                    new_grid[i, j] = float(np.median(neigh))
+                    new_valid[i, j] = True
+        grid, valid = new_grid, new_valid
+    grid[~valid] = 0.0
+    return grid
+
+
+def _upsample_grid(grid: np.ndarray, cxs: np.ndarray, cys: np.ndarray,
+                   w: int, h: int) -> np.ndarray:
+    """타일 중심 격자값을 전체 해상도로 bilinear 보간."""
+    ny, nx = grid.shape
+    xf = np.arange(w, dtype=np.float64)
+    rows = np.empty((ny, w), np.float32)
+    for i in range(ny):
+        rows[i] = np.interp(xf, cxs, grid[i].astype(np.float64))
+    if ny == 1:
+        return np.repeat(rows, h, axis=0)
+    yf = np.arange(h, dtype=np.float64)
+    i1 = np.clip(np.searchsorted(cys, yf), 1, ny - 1)
+    i0 = i1 - 1
+    wgt = np.clip((yf - cys[i0]) / (cys[i1] - cys[i0]), 0, 1).astype(np.float32)[:, None]
+    return rows[i0] * (1 - wgt) + rows[i1] * wgt
+
+
+def tile_refine(ref: np.ndarray, aligned: np.ndarray, cfg: Config,
+                debug_dir: Path | None = None) -> np.ndarray:
+    """phaseCorrelate 타일 격자로 잔차 변위장을 추정, remap으로 재정합."""
+    h, w = ref.shape
+    tile, stride = cfg.tile, cfg.tile - cfg.overlap
+    xs = list(range(0, max(w - tile, 0) + 1, stride))
+    ys = list(range(0, max(h - tile, 0) + 1, stride))
+    if xs[-1] != w - tile:
+        xs.append(w - tile)
+    if ys[-1] != h - tile:
+        ys.append(h - tile)
+
+    win = np.outer(np.hanning(tile), np.hanning(tile)).astype(np.float32)
+    dxg = np.zeros((len(ys), len(xs)), np.float32)
+    dyg = np.zeros_like(dxg)
+    valid = np.zeros(dxg.shape, bool)
+
+    for i, y0 in enumerate(ys):
+        for j, x0 in enumerate(xs):
+            rt = ref[y0:y0 + tile, x0:x0 + tile].astype(np.float32)
+            tt = aligned[y0:y0 + tile, x0:x0 + tile].astype(np.float32)
+            (dx, dy), resp = cv2.phaseCorrelate(rt * win, tt * win)
+            if resp >= cfg.min_response and np.hypot(dx, dy) <= cfg.max_shift:
+                dxg[i, j], dyg[i, j] = dx, dy
+                valid[i, j] = True
+
+    n_valid = int(valid.sum())
+    print(f"[타일 정합] {dxg.size}개 타일 중 유효 {n_valid}개, "
+          f"|shift| 중앙값 {np.median(np.hypot(dxg[valid], dyg[valid])):.2f}px"
+          if n_valid else "[타일 정합] 유효 타일 없음 — 정밀 정합 생략")
+    if not n_valid:
+        return aligned
+
+    dxg = _fill_invalid(dxg, valid)
+    dyg = _fill_invalid(dyg, valid)
+
+    cxs = np.array([x + tile / 2 for x in xs], np.float64)
+    cys = np.array([y + tile / 2 for y in ys], np.float64)
+
+    map_x = _upsample_grid(dxg, cxs, cys, w, h)
+    map_x += np.arange(w, dtype=np.float32)[None, :]
+    map_y = _upsample_grid(dyg, cxs, cys, w, h)
+    map_y += np.arange(h, dtype=np.float32)[:, None]
+
+    refined = cv2.remap(aligned, map_x, map_y, cv2.INTER_LINEAR,
+                        borderMode=cv2.BORDER_CONSTANT, borderValue=255)
+    if debug_dir:
+        imwrite(debug_dir / "tile_dx.png",
+                cv2.normalize(dxg, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8))
+        imwrite(debug_dir / "tile_dy.png",
+                cv2.normalize(dyg, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8))
+    return refined
+
+
+# ---------------------------------------------------------------------------
+# 3.3 잉크 이진화
+# ---------------------------------------------------------------------------
+
+def flatten_background(img: np.ndarray, cfg: Config) -> np.ndarray:
+    bg = cv2.morphologyEx(img, cv2.MORPH_CLOSE, ellipse(cfg.bg_kernel))
+    return cv2.divide(img, bg, scale=255)
+
+
+def ink_mask(gray: np.ndarray, cfg: Config) -> np.ndarray:
+    return cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
+                                 cv2.THRESH_BINARY_INV,
+                                 blockSize=cfg.thresh_block, C=cfg.thresh_c)
+
+
+# ---------------------------------------------------------------------------
+# 3.4 구조 diff
+# ---------------------------------------------------------------------------
+
+def structural_diff(ref_ink: np.ndarray, test_ink: np.ndarray, tol: int):
+    """(open 후 extra, open 후 missing, 원시 extra, 원시 missing) 반환."""
+    k = ellipse(tol)
+    raw_extra = cv2.bitwise_and(test_ink, cv2.bitwise_not(cv2.dilate(ref_ink, k)))
+    raw_missing = cv2.bitwise_and(ref_ink, cv2.bitwise_not(cv2.dilate(test_ink, k)))
+    open3 = ellipse(3)
+    extra = cv2.morphologyEx(raw_extra, cv2.MORPH_OPEN, open3)
+    missing = cv2.morphologyEx(raw_missing, cv2.MORPH_OPEN, open3)
+    return extra, missing, raw_extra, raw_missing
+
+
+# ---------------------------------------------------------------------------
+# 3.5 군집화 / 필터링 / 기대차이
+# ---------------------------------------------------------------------------
+
+def cluster_components(diff: np.ndarray, raw_diff: np.ndarray, gray_src: np.ndarray,
+                       max_gray: int, cfg: Config, ref_shape: tuple,
+                       content_bbox: tuple) -> list[dict]:
+    """diff 마스크를 병합·군집화해 (bbox, 실제 diff 픽셀 수) 목록 반환.
+
+    - 면적은 open 전 원시 diff(raw_diff) 기준으로 계산(획 부착 소형 결함 보존)
+    - gray_src(diff 픽셀 위치의 밝기 소스)의 평균이 max_gray보다 밝은 성분은
+      망점/고스트 톤 차이로 보고 제외 (함정 #2)
+    """
+    h, w = ref_shape
+    min_area = cfg.min_area * (w / REF_BASE_WIDTH) ** 2
+    merged = cv2.dilate(diff, ellipse(cfg.merge_kernel))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(merged, 8)
+    cx0, cy0, cx1, cy1 = content_bbox
+    out = []
+    for i in range(1, n):
+        x, y, bw, bh = stats[i, 0], stats[i, 1], stats[i, 2], stats[i, 3]
+        roi = diff[y:y + bh, x:x + bw]
+        # 병합 팽창분을 걷어낸 실제 diff 잉크 픽셀 수(원시 diff 기준)
+        area = int(cv2.countNonZero(raw_diff[y:y + bh, x:x + bw]))
+        if area < min_area:
+            continue
+        # 콘텐츠 마스크: REF 잉크 bbox 밖 성분 제외
+        if x + bw < cx0 or x > cx1 or y + bh < cy0 or y > cy1:
+            continue
+        mask = roi > 0
+        if not mask.any():
+            continue
+        # 망점/고스트 톤 차이 억제: diff 픽셀 평균 밝기 검사
+        mean_gray = float(gray_src[y:y + bh, x:x + bw][mask].mean())
+        if mean_gray > max_gray:
+            continue
+        # bbox를 실제 diff 픽셀 범위로 타이트하게 축소
+        ys_nz, xs_nz = np.nonzero(mask)
+        tx, ty = int(x) + int(xs_nz.min()), int(y) + int(ys_nz.min())
+        tw = int(xs_nz.max() - xs_nz.min()) + 1
+        th = int(ys_nz.max() - ys_nz.min()) + 1
+        out.append({"bbox": (tx, ty, tw, th), "area": area})
+    return out
+
+
+def in_margin(bbox: tuple, ref_shape: tuple, ratio: float) -> bool:
+    h, w = ref_shape
+    mx, my = w * ratio, h * ratio
+    x, y, bw, bh = bbox
+    return (x + bw <= mx) or (x >= w - mx) or (y + bh <= my) or (y >= h - my)
+
+
+def content_bbox_of(ref_ink: np.ndarray) -> tuple:
+    nz = cv2.findNonZero(ref_ink)
+    if nz is None:
+        return (0, 0, ref_ink.shape[1], ref_ink.shape[0])
+    x, y, w, h = cv2.boundingRect(nz)
+    return (x, y, x + w, y + h)
+
+
+# ---------------------------------------------------------------------------
+# 3.5b 리플로우(개정 줄 밀림) 억제
+# ---------------------------------------------------------------------------
+
+def find_shifted_match(src: np.ndarray, dst: np.ndarray, bbox: tuple,
+                       pad: int, search_x: int, search_y: int,
+                       exclude_r: int = 0) -> tuple[float, int, int]:
+    """bbox 크롭(문맥 패딩 포함)을 dst의 국소 탐색창에서 템플릿 매칭.
+
+    개정판 간 문구 추가/삭제로 이후 줄이 통째로 밀리면(reflow) 픽셀 diff는
+    밀린 모든 줄을 missing/extra 쌍으로 오탐한다. diff 내용이 상대 이미지의
+    변위된 위치에 그대로 존재하면 결함이 아닌 줄 밀림이다. 패딩으로 주변
+    문맥을 포함시켜, 실제 결함(주변은 정합·해당 부분만 상이)은 어떤 변위
+    에서도 높은 상관을 얻지 못하게 한다.
+
+    exclude_r > 0 이면 |dx|,|dy| <= exclude_r 인 무변위 부근 응답은 무시.
+    반환: (최고 상관, dx, dy). 매칭 불가 시 (-1, 0, 0).
+    """
+    x, y, w, h = bbox
+    hh, ww = src.shape
+    tx0, ty0 = max(x - pad, 0), max(y - pad, 0)
+    tx1, ty1 = min(x + w + pad, ww), min(y + h + pad, hh)
+    tmpl = src[ty0:ty1, tx0:tx1]
+    if min(tmpl.shape) < 8:
+        return -1.0, 0, 0
+    wx0, wy0 = max(tx0 - search_x, 0), max(ty0 - search_y, 0)
+    wx1, wy1 = min(tx1 + search_x, ww), min(ty1 + search_y, hh)
+    win = dst[wy0:wy1, wx0:wx1]
+    if win.shape[0] < tmpl.shape[0] or win.shape[1] < tmpl.shape[1]:
+        return -1.0, 0, 0
+    res = cv2.matchTemplate(win, tmpl, cv2.TM_CCOEFF_NORMED)
+    zj, zi = tx0 - wx0, ty0 - wy0  # 무변위(dx=dy=0)의 응답 좌표
+    if exclude_r > 0:
+        i0, i1 = max(zi - exclude_r, 0), min(zi + exclude_r + 1, res.shape[0])
+        j0, j1 = max(zj - exclude_r, 0), min(zj + exclude_r + 1, res.shape[1])
+        res[i0:i1, j0:j1] = -1.0
+    _, corr, _, (j, i) = cv2.minMaxLoc(res)
+    return float(corr), j - zj, i - zi
+
+
+# ---------------------------------------------------------------------------
+# 3.6 뒷비침 검출
+# ---------------------------------------------------------------------------
+
+def detect_showthrough(norm_test: np.ndarray, ref: np.ndarray,
+                       cfg: Config, content_bbox: tuple) -> list[dict]:
+    # median blur: 망점 도트는 평탄화되어 밴드를 벗어나고, 획 폭이 있는
+    # 고스트 텍스트만 밴드(151~214)에 남는다. REF 백색 기준 215는
+    # 회색 박스 톤(~210)을 제외하기 위함 (함정 #2).
+    blurred = cv2.medianBlur(norm_test, cfg.ghost_blur)
+    band = cv2.inRange(blurred, cfg.ghost_lo + 1, cfg.ghost_band_hi)
+    ref_white = (cv2.erode(ref, ellipse(cfg.ghost_ref_erode))
+                 > cfg.ghost_ref_white).astype(np.uint8) * 255
+    ghost = cv2.bitwise_and(band, ref_white)
+    ghost = cv2.morphologyEx(ghost, cv2.MORPH_OPEN, ellipse(3))
+    merged = cv2.dilate(ghost, ellipse(cfg.ghost_merge))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(merged, 8)
+    cx0, cy0, cx1, cy1 = content_bbox
+    out = []
+    for i in range(1, n):
+        x, y, bw, bh = stats[i, 0], stats[i, 1], stats[i, 2], stats[i, 3]
+        roi = ghost[y:y + bh, x:x + bw]
+        area = int(cv2.countNonZero(roi))
+        if area <= cfg.ghost_min_area:
+            continue
+        if x + bw < cx0 or x > cx1 or y + bh < cy0 or y > cy1:
+            continue
+        ys_nz, xs_nz = np.nonzero(roi)
+        tx, ty = int(x) + int(xs_nz.min()), int(y) + int(ys_nz.min())
+        tw = int(xs_nz.max() - xs_nz.min()) + 1
+        th = int(ys_nz.max() - ys_nz.min()) + 1
+        out.append({"bbox": (tx, ty, tw, th), "area": area})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 3.7 OCR 텍스트 대조
+# ---------------------------------------------------------------------------
+
+_PUNCT = set(".,;:!?'\"`-–—()[]{}|/\\*·")
+
+
+def _norm_word(t: str) -> str:
+    return (t.replace("‘", "'").replace("’", "'")
+             .replace("“", '"').replace("”", '"')
+             .replace("–", "-").replace("—", "-").strip())
+
+
+def ocr_words(img: np.ndarray, cfg: Config) -> list[dict]:
+    import pytesseract
+    data = pytesseract.image_to_data(img, lang="eng", config="--psm 3",
+                                     output_type=pytesseract.Output.DICT)
+    words = []
+    for i in range(len(data["text"])):
+        txt = _norm_word(data["text"][i])
+        try:
+            conf = float(data["conf"][i])
+        except (ValueError, TypeError):
+            conf = -1.0
+        if not txt or conf < cfg.ocr_min_conf:
+            continue
+        words.append({
+            "text": txt,
+            "conf": conf,
+            "bbox": (data["left"][i], data["top"][i],
+                     data["width"][i], data["height"][i]),
+            "line": (data["block_num"][i], data["par_num"][i], data["line_num"][i]),
+        })
+    return words
+
+
+# OCR 혼동 문자 클래스(스캔 품질에 따른 오독) — 클래스 내 치환은 결함이 아님.
+# C↔O 같은 실제 결함성 변형은 클래스에 없으므로 보존된다.
+_CONFUSABLE = str.maketrans({c: k for k, grp in
+                             {"0": "0OoQ", "1": "1lI|i", "5": "5Ss",
+                              "8": "8B", "2": "2Zz"}.items() for c in grp})
+
+
+def _alnum(s: str) -> str:
+    return "".join(ch for ch in s if ch.isalnum())
+
+
+def _trivial_diff(tag: str, a_words: list[str], b_words: list[str]) -> bool:
+    """OCR 노이즈성 차이 판정 — True면 무시."""
+    a_join, b_join = "".join(a_words), "".join(b_words)
+    # 순수 기호/구두점 차이(불릿 ¢/* 오독, 따옴표 등)
+    if not _alnum(a_join) and not _alnum(b_join):
+        return True
+    # 띄어쓰기만 다른 경우 ('a new' vs 'anew')
+    if a_join == b_join:
+        return True
+    # 혼동 문자 정규화 후 동일 ('1-SENS' vs 'i-SENS')
+    if a_join.translate(_CONFUSABLE) == b_join.translate(_CONFUSABLE):
+        return True
+    # 삽입/삭제는 실단어 수준(영숫자 4자 이상)만 결함으로 인정
+    if tag in ("insert", "delete") and len(_alnum(a_join) + _alnum(b_join)) < 4:
+        return True
+    return False
+
+
+def text_mismatches(ref_words: list[dict], test_words: list[dict]) -> list[dict]:
+    a = [w["text"] for w in ref_words]
+    b = [w["text"] for w in test_words]
+    sm = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
+    out = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            continue
+        ref_seg = a[i1:i2]
+        test_seg = b[j1:j2]
+        if _trivial_diff(tag, ref_seg, test_seg):
+            continue
+        # bbox: TEST 쪽 단어 박스(없으면 REF 쪽) 합집합
+        boxes = [test_words[j]["bbox"] for j in range(j1, j2)] or \
+                [ref_words[i]["bbox"] for i in range(i1, i2)]
+        xs = [bx for bx, _, _, _ in boxes]
+        ys = [by for _, by, _, _ in boxes]
+        x2 = [bx + bw for bx, _, bw, _ in boxes]
+        y2 = [by + bh for _, by, _, bh in boxes]
+        bbox = (min(xs), min(ys), max(x2) - min(xs), max(y2) - min(ys))
+        out.append({
+            "bbox": bbox,
+            "ref_text": " ".join(ref_seg),
+            "test_text": " ".join(test_seg),
+            "tag": tag,
+        })
+    return out
+
+
+def pixel_corroborated(mm: dict, ref_ink: np.ndarray, test_ink: np.ndarray,
+                       pad: int = 10) -> bool:
+    """OCR 불일치의 픽셀 증거 대조 — 실제 잉크 차이가 없으면 OCR 오독으로 판정.
+
+    - replace: bbox 내 국소 diff(tol=3) 비율 ≥ 5% 필요 (동일 글리프 오독 배제)
+    - delete : TEST에 잉크가 실제로 없어야 함 (망점 영역 OCR 판독 실패 배제)
+    - insert : REF에 잉크가 실제로 없어야 함
+    """
+    x, y, w, h = mm["bbox"]
+    hh, ww = ref_ink.shape
+    x0, y0 = max(x - pad, 0), max(y - pad, 0)
+    x1, y1 = min(x + w + pad, ww), min(y + h + pad, hh)
+    r = ref_ink[y0:y1, x0:x1]
+    t = test_ink[y0:y1, x0:x1]
+    rn, tn = int(cv2.countNonZero(r)), int(cv2.countNonZero(t))
+    if mm["tag"] == "delete":
+        return tn < 0.5 * rn
+    if mm["tag"] == "insert":
+        return rn < 0.5 * tn
+    k3 = ellipse(3)
+    ev = cv2.countNonZero(cv2.bitwise_and(t, cv2.bitwise_not(cv2.dilate(r, k3)))) \
+       + cv2.countNonZero(cv2.bitwise_and(r, cv2.bitwise_not(cv2.dilate(t, k3))))
+    return ev >= 0.05 * max(rn, 1)
+
+
+# ---------------------------------------------------------------------------
+# 3.8 심각도 분류
+# ---------------------------------------------------------------------------
+
+def line_boxes_with(ref_words: list[dict], token: str) -> list[tuple]:
+    """token(대소문자 무시)을 포함한 라인의 합집합 bbox 목록."""
+    lines: dict[tuple, list] = {}
+    hits: set = set()
+    for w in ref_words:
+        lines.setdefault(w["line"], []).append(w["bbox"])
+        if token.lower() in w["text"].lower():
+            hits.add(w["line"])
+    out = []
+    for key in hits:
+        boxes = lines[key]
+        xs = [b[0] for b in boxes]
+        ys = [b[1] for b in boxes]
+        x2 = [b[0] + b[2] for b in boxes]
+        y2 = [b[1] + b[3] for b in boxes]
+        out.append((min(xs), min(ys), max(x2) - min(xs), max(y2) - min(ys)))
+    return out
+
+
+def boxes_intersect(a: tuple, b: tuple) -> bool:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return not (ax + aw < bx or bx + bw < ax or ay + ah < by or by + bh < ay)
+
+
+def dup_of_text_mismatch(f: Finding, findings: list[Finding]) -> bool:
+    """잉크 diff 결함이 text_mismatch 영역과 겹치면 중복 보고 — 인쇄 오류만 남긴다."""
+    if f.type not in ("extra", "missing"):
+        return False
+    return any(t.type == "text_mismatch" and boxes_intersect(f.bbox_ref, t.bbox_ref)
+               for t in findings)
+
+
+def ruled_box_mask(ref_ink: np.ndarray) -> np.ndarray:
+    """수평·수직 장선으로 둘러싸인 괘선 박스 영역 마스크."""
+    horiz = cv2.morphologyEx(ref_ink, cv2.MORPH_OPEN,
+                             cv2.getStructuringElement(cv2.MORPH_RECT, (101, 1)))
+    vert = cv2.morphologyEx(ref_ink, cv2.MORPH_OPEN,
+                            cv2.getStructuringElement(cv2.MORPH_RECT, (1, 101)))
+    lines = cv2.bitwise_or(horiz, vert)
+    lines = cv2.dilate(lines, ellipse(5))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(lines, 8)
+    mask = np.zeros_like(ref_ink)
+    for i in range(1, n):
+        x, y, w, h = stats[i, 0], stats[i, 1], stats[i, 2], stats[i, 3]
+        if w > 300 and h > 300:  # 수평+수직선이 연결된 실제 박스 구조만
+            mask[y:y + h, x:x + w] = 255
+    return mask
+
+
+def classify_severity(f: Finding, ref_words: list[dict],
+                      rev_lines: list[tuple], box_mask: np.ndarray) -> str:
+    if f.type in ("trim_mark_expected", "layout_reflow"):
+        return "expected"
+    if f.type == "text_mismatch":
+        return "critical"
+    for lb in rev_lines:
+        if boxes_intersect(f.bbox_ref, lb):
+            return "critical"
+    for w in ref_words:
+        if boxes_intersect(f.bbox_ref, w["bbox"]):
+            return "major"
+    if f.type == "showthrough":
+        return "major"
+    x, y, bw, bh = f.bbox_ref
+    cx = min(max(x + bw // 2, 0), box_mask.shape[1] - 1)
+    cy = min(max(y + bh // 2, 0), box_mask.shape[0] - 1)
+    if box_mask[cy, cx]:
+        return "major"
+    return "minor"
+
+
+def nearest_text(bbox: tuple, ref_words: list[dict], k: int = 3) -> str:
+    if not ref_words:
+        return ""
+    x, y, w, h = bbox
+    cx, cy = x + w / 2, y + h / 2
+    scored = sorted(
+        ref_words,
+        key=lambda wd: (wd["bbox"][0] + wd["bbox"][2] / 2 - cx) ** 2
+                     + (wd["bbox"][1] + wd["bbox"][3] / 2 - cy) ** 2)
+    return " ".join(wd["text"] for wd in scored[:k])
+
+
+# ---------------------------------------------------------------------------
+# 3.9 리포트 렌더링
+# ---------------------------------------------------------------------------
+
+def render_annotated(test_aligned: np.ndarray, findings: list[Finding],
+                     out: Path) -> None:
+    canvas = cv2.cvtColor(test_aligned, cv2.COLOR_GRAY2BGR)
+    for f in findings:
+        x, y, w, h = f.bbox_ref
+        # showthrough(불량 미처리)와 text_mismatch 중복 보고는 회색 표시
+        if (f.severity == "expected" or f.type == "showthrough"
+                or dup_of_text_mismatch(f, findings)):
+            cv2.rectangle(canvas, (x, y), (x + w, y + h), (160, 160, 160), 4)
+            continue
+        cv2.rectangle(canvas, (x, y), (x + w, y + h), (0, 0, 255), 9)
+        cv2.putText(canvas, str(f.id), (x, max(y - 20, 60)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 2.6, (0, 0, 255), 6, cv2.LINE_AA)
+    small = cv2.resize(canvas, None, fx=0.45, fy=0.45,
+                       interpolation=cv2.INTER_AREA)
+    imwrite(out, small)
+
+
+def _crop_pad(img: np.ndarray, bbox: tuple, pad: int = 80) -> np.ndarray:
+    x, y, w, h = bbox
+    h_img, w_img = img.shape[:2]
+    x0, y0 = max(x - pad, 0), max(y - pad, 0)
+    x1, y1 = min(x + w + pad, w_img), min(y + h + pad, h_img)
+    return img[y0:y1, x0:x1]
+
+
+def _tagged(crop_gray: np.ndarray, tag: str, color: tuple,
+            width: int) -> np.ndarray:
+    """크롭을 폭에 맞춰 정규화(과확대 4배 제한, 여백 패딩) 후 태그를 그린다."""
+    s = min(width / crop_gray.shape[1], 4.0)
+    resized = cv2.resize(crop_gray, None, fx=s, fy=s,
+                         interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_LINEAR)
+    img = cv2.cvtColor(resized, cv2.COLOR_GRAY2BGR)
+    if img.shape[1] < width:
+        pad = np.full((img.shape[0], width - img.shape[1], 3), 255, np.uint8)
+        img = np.hstack([img, pad])
+    cv2.rectangle(img, (0, 0), (140, 54), color, -1)
+    cv2.putText(img, tag, (12, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2,
+                (255, 255, 255), 3, cv2.LINE_AA)
+    return img
+
+
+def render_contact_sheet(ref: np.ndarray, test_aligned: np.ndarray,
+                         findings: list[Finding], out: Path,
+                         width: int = 2000, max_height: int = 60000) -> None:
+    # max_height: 브라우저 이미지 디코딩 한계(~65,535px)를 넘지 않도록 상한.
+    # 초과분은 생략하고 마지막에 안내 행을 붙인다(상세는 findings.json/csv).
+    blocks = []
+    height = 0
+    n_skipped = 0
+    targets = [f for f in findings
+               if f.severity != "expected" and f.type != "showthrough"
+               and not dup_of_text_mismatch(f, findings)]
+    for f in targets:
+        header = np.full((90, width, 3), 255, np.uint8)
+        title = f"#{f.id}  {f.type}  [{f.severity.upper()}]  bbox={list(f.bbox_ref)}"
+        cv2.putText(header, title, (16, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.4,
+                    (0, 0, 0), 3, cv2.LINE_AA)
+
+        ref_c = _tagged(_crop_pad(ref, f.bbox_ref), "REF", (120, 120, 120), width)
+        test_c = _tagged(_crop_pad(test_aligned, f.bbox_ref), "TEST", (0, 0, 255), width)
+        sep = np.zeros((6, width, 3), np.uint8)
+        sep[:, :] = (0, 0, 255)
+        gap = np.full((40, width, 3), 255, np.uint8)
+        block_h = sum(b.shape[0] for b in (header, ref_c, sep, test_c, gap))
+        if height + block_h > max_height - 90:
+            n_skipped = len(targets) - targets.index(f)
+            break
+        blocks += [header, ref_c, sep, test_c, gap]
+        height += block_h
+    if n_skipped:
+        footer = np.full((90, width, 3), 255, np.uint8)
+        cv2.putText(footer, f"... {n_skipped} more findings omitted "
+                    "(see findings.json / findings.csv)", (16, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 255), 3, cv2.LINE_AA)
+        blocks.append(footer)
+    if not blocks:
+        blocks = [np.full((90, width, 3), 255, np.uint8)]
+        cv2.putText(blocks[0], "No defects found", (16, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 0), 3, cv2.LINE_AA)
+    imwrite(out, np.vstack(blocks))
+
+
+def write_reports(findings: list[Finding], outdir: Path) -> None:
+    data = [f.to_dict() for f in findings]
+    (outdir / "findings.json").write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    with open(outdir / "findings.csv", "w", newline="", encoding="utf-8-sig") as fp:
+        wr = csv.writer(fp)
+        wr.writerow(["id", "type", "severity", "x", "y", "w", "h",
+                     "area_px", "near_text", "note"])
+        for f in findings:
+            wr.writerow([f.id, f.type, f.severity, *f.bbox_ref,
+                         f.area_px, f.near_text, f.note])
+
+
+def print_summary(findings: list[Finding]) -> None:
+    print()
+    print(f"{'번호':>4} {'유형':<18} {'심각도':<10} {'bbox (x,y,w,h)':<28} 비고")
+    print("-" * 100)
+    for f in findings:
+        print(f"{f.id:>4} {f.type:<18} {f.severity:<10} "
+              f"{str(list(f.bbox_ref)):<28} {f.note}")
+    n_defect = sum(1 for f in findings if f.severity != "expected")
+    n_exp = len(findings) - n_defect
+    print("-" * 100)
+    print(f"결함 {n_defect}건, 기대 차이(재단선 등) {n_exp}건")
+
+
+# ---------------------------------------------------------------------------
+# 6. (선택) LLM 검증 훅
+# ---------------------------------------------------------------------------
+
+def llm_verify(findings: list[Finding], ref: np.ndarray,
+               test_aligned: np.ndarray) -> None:
+    """결함 후보 크롭 쌍만 Claude(haiku급)에 배치 전송해 defect|noise|expected 분류.
+    전체 페이지 이미지는 절대 전송하지 않는다."""
+    try:
+        import anthropic
+    except ImportError:
+        print("[LLM] anthropic 패키지 미설치 — pip install anthropic 후 재시도.")
+        return
+    import base64
+
+    def crop_b64(img, bbox):
+        c = _crop_pad(img, bbox, pad=40)
+        # 각 크롭 ≤ 400×200
+        s = min(400 / c.shape[1], 200 / c.shape[0], 1.0)
+        if s < 1.0:
+            c = cv2.resize(c, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".png", c)
+        return base64.standard_b64encode(buf.tobytes()).decode()
+
+    client = anthropic.Anthropic()
+    targets = [f for f in findings
+               if f.severity != "expected" and f.type != "showthrough"
+               and not dup_of_text_mismatch(f, findings)]
+    content = [{"type": "text", "text":
+                "다음은 인쇄물 검수에서 검출된 결함 후보들입니다. 각 후보마다 REF(승인 아트웍) "
+                "크롭과 TEST(실물 스캔) 크롭이 순서대로 주어집니다. 각 후보를 "
+                "defect(실제 인쇄 결함) | noise(스캔 노이즈/오탐) | expected(정상적 차이) 로 "
+                '분류하고 JSON 배열로만 답하세요: [{"id": n, "verdict": "...", "reason": "한 줄"}]'}]
+    for f in targets:
+        content.append({"type": "text", "text": f"--- 후보 #{f.id} ({f.type}) REF/TEST ---"})
+        for img in (ref, test_aligned):
+            content.append({"type": "image", "source": {
+                "type": "base64", "media_type": "image/png",
+                "data": crop_b64(img, f.bbox_ref)}})
+
+    resp = client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=2048,
+        messages=[{"role": "user", "content": content}],
+    )
+    text = next((b.text for b in resp.content if b.type == "text"), "")
+    try:
+        start, end = text.index("["), text.rindex("]") + 1
+        verdicts = {v["id"]: v for v in json.loads(text[start:end])}
+    except (ValueError, KeyError, json.JSONDecodeError):
+        print(f"[LLM] 응답 파싱 실패:\n{text}")
+        return
+    for f in targets:
+        v = verdicts.get(f.id)
+        if v:
+            f.note += f" [LLM: {v['verdict']} — {v.get('reason', '')}]"
+    print(f"[LLM] {len(verdicts)}/{len(targets)}건 검증 완료")
+
+
+# ---------------------------------------------------------------------------
+# 파이프라인 본체
+# ---------------------------------------------------------------------------
+
+def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
+                 cfg: Config) -> list[Finding]:
+    t0 = time.time()
+    outdir.mkdir(parents=True, exist_ok=True)
+    debug_dir = None
+    if cfg.debug:
+        debug_dir = outdir / "debug"
+        debug_dir.mkdir(exist_ok=True)
+
+    ref = imread_gray(ref_path)
+    test = imread_gray(test_path)
+    print(f"[입력] REF {ref.shape[1]}x{ref.shape[0]}, "
+          f"TEST {test.shape[1]}x{test.shape[0]}")
+
+    # 3.1 전역 정합
+    aligned = global_align(ref, test, cfg)
+
+    # 3.2 타일 정밀 정합
+    if cfg.use_tile_refine:
+        aligned = tile_refine(ref, aligned, cfg, debug_dir)
+        tol = cfg.tol
+    else:
+        tol = cfg.tol_fallback
+        print(f"[타일 정합] 생략(폴백 모드) — tol={tol}")
+    imwrite(outdir / "aligned_test.png", aligned)
+
+    # 3.3 이진화
+    norm_test = flatten_background(aligned, cfg)
+    ref_ink = ink_mask(ref, cfg)
+    test_ink = ink_mask(norm_test, cfg)
+    if debug_dir:
+        imwrite(debug_dir / "norm_test.png", norm_test)
+        imwrite(debug_dir / "ref_ink.png", ref_ink)
+        imwrite(debug_dir / "test_ink.png", test_ink)
+
+    # 3.4 구조 diff
+    extra, missing, raw_extra, raw_missing = structural_diff(ref_ink, test_ink, tol)
+    if debug_dir:
+        imwrite(debug_dir / "extra.png", extra)
+        imwrite(debug_dir / "missing.png", missing)
+
+    # 3.5 군집화 (+ 망점 톤 차이 억제)
+    cbox = content_bbox_of(ref_ink)
+    extra_comps = cluster_components(extra, raw_extra, norm_test,
+                                     cfg.extra_max_norm, cfg, ref.shape, cbox)
+    missing_comps = cluster_components(missing, raw_missing, ref,
+                                       cfg.missing_max_ref, cfg, ref.shape, cbox)
+
+    # 3.5b 리플로우 억제: diff 내용이 상대 이미지의 변위 위치에 그대로 있으면
+    # 개정 줄 밀림으로 판정. extra는 TEST 크롭을 REF에서, missing은 REF 크롭을
+    # TEST에서 찾는다.
+    rf_scale = ref.shape[1] / REF_BASE_WIDTH
+    rf_pad = max(round(cfg.reflow_pad * rf_scale), 16)
+    rf_sx = max(round(cfg.reflow_search_x * rf_scale), 20)
+    rf_sy = max(round(cfg.reflow_search_y * rf_scale), 40)
+    rf_ex = max(round(cfg.reflow_exclude * rf_scale), 6)
+
+    ref_ink_dil = cv2.dilate(ref_ink, ellipse(5))
+    test_ink_dil = cv2.dilate(test_ink, ellipse(5))
+
+    def is_reflow(src, dst, bbox, diff_mask, dst_ink_dil):
+        """상관 매칭 + 픽셀 검증. 문맥이 자기유사(장선·여백)해 상관만으로는
+        오억제될 수 있으므로, diff 잉크 픽셀이 변위 위치에서 실제 상대 잉크로
+        덮이는지(reflow_min_cover)까지 확인한다."""
+        corr, dx, dy = find_shifted_match(src, dst, bbox, rf_pad,
+                                          rf_sx, rf_sy, exclude_r=rf_ex)
+        if corr < cfg.reflow_min_corr:
+            return False
+        x, y, w, h = bbox
+        ys_nz, xs_nz = np.nonzero(diff_mask[y:y + h, x:x + w])
+        if len(ys_nz) == 0:
+            return True
+        hh, ww = dst_ink_dil.shape
+        yy = np.clip(ys_nz + y + dy, 0, hh - 1)
+        xx = np.clip(xs_nz + x + dx, 0, ww - 1)
+        cover = float((dst_ink_dil[yy, xx] > 0).mean())
+        return cover >= cfg.reflow_min_cover
+
+    reflow_boxes: list[tuple] = []
+
+    def split_reflow(comps, src, dst, diff_mask, dst_ink_dil):
+        kept = []
+        for c in comps:
+            if is_reflow(src, dst, c["bbox"], diff_mask, dst_ink_dil):
+                reflow_boxes.append(c["bbox"])
+            else:
+                kept.append(c)
+        return kept
+
+    n_extra_all, n_missing_all = len(extra_comps), len(missing_comps)
+    extra_comps = split_reflow(extra_comps, norm_test, ref, raw_extra, ref_ink_dil)
+    missing_comps = split_reflow(missing_comps, ref, norm_test,
+                                 raw_missing, test_ink_dil)
+
+    findings: list[Finding] = []
+    for c in extra_comps:
+        findings.append(Finding(type="extra", bbox_ref=c["bbox"], area_px=c["area"]))
+    for c in missing_comps:
+        if in_margin(c["bbox"], ref.shape, cfg.margin_ratio):
+            findings.append(Finding(type="trim_mark_expected",
+                                    bbox_ref=c["bbox"], area_px=c["area"],
+                                    note="재단선/레지스터 마크 (TEST 재단 완료) — 정상"))
+        else:
+            findings.append(Finding(type="missing", bbox_ref=c["bbox"],
+                                    area_px=c["area"]))
+
+    # 3.6 뒷비침 (밀린 본문 텍스트가 고스트로 오탐되는 경우도 리플로우 매칭으로 억제)
+    # 위/아래 밀림량이 다른 경계 성분은 단일 변위 매칭이 실패할 수 있으므로,
+    # 이미 리플로우로 억제된 영역과 유의미하게 겹치는 성분도 함께 억제한다.
+    ink_reflow_boxes = list(reflow_boxes)
+
+    def overlaps_reflow(bbox):
+        x, y, w, h = bbox
+        for rx, ry, rw, rh in ink_reflow_boxes:
+            ix = max(0, min(x + w, rx + rw) - max(x, rx))
+            iy = max(0, min(y + h, ry + rh) - max(y, ry))
+            if ix * iy > 0.1 * w * h:
+                return True
+        return False
+
+    st_comps = detect_showthrough(norm_test, ref, cfg, cbox)
+    st_comps = split_reflow(st_comps, norm_test, ref, test_ink, ref_ink_dil)
+    st_kept = []
+    for c in st_comps:
+        if overlaps_reflow(c["bbox"]):
+            reflow_boxes.append(c["bbox"])
+        else:
+            st_kept.append(c)
+    st_comps = st_kept
+    for c in st_comps:
+        findings.append(Finding(type="showthrough", bbox_ref=c["bbox"],
+                                area_px=c["area"],
+                                note="뒷면 인쇄 비침(show-through) — 옅은 회색 고스트"))
+    print(f"[diff] extra {len(extra_comps)}/{n_extra_all}, "
+          f"missing {len(missing_comps)}/{n_missing_all}, "
+          f"showthrough {len(st_comps)}, 리플로우 억제 {len(reflow_boxes)}건")
+
+    if reflow_boxes:
+        xs0 = min(b[0] for b in reflow_boxes)
+        ys0 = min(b[1] for b in reflow_boxes)
+        xs1 = max(b[0] + b[2] for b in reflow_boxes)
+        ys1 = max(b[1] + b[3] for b in reflow_boxes)
+        findings.append(Finding(
+            type="layout_reflow", severity="expected",
+            bbox_ref=(xs0, ys0, xs1 - xs0, ys1 - ys0),
+            area_px=sum(b[2] * b[3] for b in reflow_boxes),
+            note=f"개정 줄 밀림(reflow) 영역 {len(reflow_boxes)}건 — 동일 내용이 "
+                 "국소 이동만 된 것으로 결함 아님. 문구 변경 자체는 "
+                 "text_mismatch로 별도 보고됨"))
+
+    # 3.7 OCR
+    ref_words: list[dict] = []
+    rev_lines: list[tuple] = []
+    if cfg.use_ocr:
+        try:
+            t_ocr = time.time()
+            ref_words = ocr_words(ref, cfg)
+            test_words = ocr_words(aligned, cfg)
+            print(f"[OCR] REF {len(ref_words)}단어, TEST {len(test_words)}단어 "
+                  f"({time.time() - t_ocr:.1f}s)")
+            rev_lines = line_boxes_with(ref_words, "REV")
+            for mm in text_mismatches(ref_words, test_words):
+                if not pixel_corroborated(mm, ref_ink, test_ink):
+                    continue
+                # 리플로우 지역에서는 국소 diff가 커서 픽셀 대조가 무력화됨 —
+                # 동일 글리프가 변위 위치에 있으면 OCR 오독으로 보고 제외
+                if mm["tag"] == "delete":
+                    rf_args = (ref, norm_test, ref_ink, test_ink_dil)
+                else:
+                    rf_args = (norm_test, ref, test_ink, ref_ink_dil)
+                if is_reflow(rf_args[0], rf_args[1], mm["bbox"],
+                             rf_args[2], rf_args[3]):
+                    continue
+                findings.append(Finding(
+                    type="text_mismatch", bbox_ref=mm["bbox"],
+                    area_px=mm["bbox"][2] * mm["bbox"][3],
+                    note=f"OCR 불일치: '{mm['ref_text']}' → '{mm['test_text']}'"))
+        except Exception as e:  # tesseract 미설치 등
+            print(f"[OCR] 실패({e}) — OCR 경로 생략. --no-ocr 로 경고 억제 가능.")
+
+    # 3.8 심각도
+    box_mask = ruled_box_mask(ref_ink)
+    if debug_dir:
+        imwrite(debug_dir / "box_mask.png", box_mask)
+    for f in findings:
+        f.severity = classify_severity(f, ref_words, rev_lines, box_mask)
+        f.near_text = nearest_text(f.bbox_ref, ref_words)
+        if not f.note:
+            if f.type == "extra":
+                f.note = "TEST에만 존재하는 잉여 잉크"
+                if f.severity == "critical":
+                    f.note += " — 문서번호/개정(REV) 행 침범"
+                elif f.severity == "major":
+                    f.note += " — 글자/괘선 영역 침범"
+            elif f.type == "missing":
+                f.note = "REF 대비 잉크 누락"
+
+    # 정렬(위→아래, 좌→우) 후 번호 부여: 화면에 표시되는 결함이 1..N 연속이
+    # 되도록 표시 대상(억제·뒷비침·expected 제외)을 먼저 배치한다.
+    def _pos_key(f):
+        return (f.bbox_ref[1], f.bbox_ref[0])
+
+    shown = sorted((f for f in findings
+                    if f.severity != "expected" and f.type != "showthrough"
+                    and not dup_of_text_mismatch(f, findings)), key=_pos_key)
+    rest = sorted((f for f in findings if f not in shown), key=_pos_key)
+    findings[:] = shown + rest
+    for i, f in enumerate(findings, 1):
+        f.id = i
+
+    # 6. LLM 검증 훅(선택)
+    if cfg.llm_verify:
+        llm_verify(findings, ref, aligned)
+
+    # 3.9 리포트
+    render_annotated(aligned, findings, outdir / "annotated.png")
+    render_contact_sheet(ref, aligned, findings, outdir / "contact_sheet.png")
+    write_reports(findings, outdir)
+    print_summary(findings)
+    print(f"\n[완료] {time.time() - t0:.1f}s, 산출물: {outdir}")
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        description="인쇄 아트웍(REF) vs 실물 스캔(TEST) 결함 자동 검출")
+    ap.add_argument("ref", type=Path, help="승인 아트웍 PNG (REF)")
+    ap.add_argument("test", type=Path, help="실물 스캔 PNG (TEST)")
+    ap.add_argument("-o", "--outdir", type=Path, required=True, help="출력 디렉토리")
+    ap.add_argument("--tol", type=int, default=5, help="diff 팽창 허용치(px), 기본 5")
+    ap.add_argument("--min-area", type=int, default=60,
+                    help="최소 diff 잉크 픽셀 수(REF 폭 5564 기준), 기본 60")
+    ap.add_argument("--no-ocr", action="store_true", help="OCR 텍스트 대조 비활성")
+    ap.add_argument("--no-tile-refine", action="store_true",
+                    help="타일 정밀 정합 생략(폴백 모드, tol=13)")
+    ap.add_argument("--llm-verify", action="store_true",
+                    help="결함 후보 크롭을 Claude API로 검증(선택)")
+    ap.add_argument("--debug", action="store_true", help="중간 마스크를 debug/에 저장")
+    args = ap.parse_args(argv)
+
+    cfg = Config(tol=args.tol, min_area=args.min_area,
+                 use_ocr=not args.no_ocr,
+                 use_tile_refine=not args.no_tile_refine,
+                 llm_verify=args.llm_verify, debug=args.debug)
+    run_pipeline(args.ref, args.test, args.outdir, cfg)
+
+
+if __name__ == "__main__":
+    main()

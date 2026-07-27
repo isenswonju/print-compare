@@ -1,0 +1,264 @@
+// 브라우저 캐시 (IndexedDB) — 전자동, 관리 불필요.
+//  * refWords: 아트웍(REF) 파일 해시 → OCR 단어 목록. 같은 아트웍 재검수 시
+//    REF OCR(~90초)을 통째로 건너뛴다. 아트웍이 개정되면 해시가 달라져
+//    자동으로 새로 계산된다.
+//  * artworks: 검수했던 아트웍 원본 파일. "최근 아트웍" 원클릭 재사용.
+//    LRU 50개 초과분은 자동 삭제.
+import type { PipelineResult, SetFb, Word } from "./types.ts";
+
+const DB_NAME = "artwork-compare-cache";
+const DB_VER = 3;
+// 결과 세션 보존 정책 (일반적인 웹 도구 관례): 최근 1세션만, 7일 후 만료.
+// 브라우저 안에만 저장되며 서버로 가지 않는다.
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+// OCR 설정이 바뀌면 키가 달라져 옛 캐시를 자연 무효화한다
+export const OCR_CACHE_VER = "v1-eng-best-psm3";
+
+export interface ArtworkEntry {
+  hash: string;
+  name: string;
+  size: number;
+  type: string;
+  blob: Blob;
+  lastUsed: number;
+  section?: string; // 소속 섹션 id(없으면 미분류)
+}
+
+export interface Section {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
+let dbPromise: Promise<IDBDatabase> | null = null;
+
+function openDB(): Promise<IDBDatabase> {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((res, rej) => {
+    const req = indexedDB.open(DB_NAME, DB_VER);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains("refWords"))
+        db.createObjectStore("refWords");
+      if (!db.objectStoreNames.contains("artworks"))
+        db.createObjectStore("artworks");
+      if (!db.objectStoreNames.contains("session"))
+        db.createObjectStore("session");
+      if (!db.objectStoreNames.contains("sections"))
+        db.createObjectStore("sections");
+    };
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  });
+  return dbPromise;
+}
+
+function tx<T>(store: string, mode: IDBTransactionMode,
+               fn: (s: IDBObjectStore) => IDBRequest | void): Promise<T | undefined> {
+  return openDB().then((db) =>
+    new Promise<T | undefined>((res, rej) => {
+      const t = db.transaction(store, mode);
+      const s = t.objectStore(store);
+      const out = fn(s);
+      t.oncomplete = () =>
+        res(out && out.result !== undefined ? (out.result as T) : undefined);
+      t.onerror = () => rej(t.error);
+    }));
+}
+
+// FNV-1a 폴백 — crypto.subtle은 보안 컨텍스트(HTTPS/localhost)에서만 존재한다.
+// 사내망 http:// 접속에서는 이 폴백을 쓴다. 캐시 키 용도로는 충분하다.
+function fnvHash(bytes: Uint8Array, seed: number): string {
+  let h = seed >>> 0;
+  for (let i = 0; i < bytes.length; i++) {
+    h ^= bytes[i];
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+export async function hashFile(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  if (crypto?.subtle) {
+    const digest = await crypto.subtle.digest("SHA-256", buf);
+    return [...new Uint8Array(digest)]
+      .map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  const bytes = new Uint8Array(buf);
+  return `fnv-${bytes.length.toString(16)}-` +
+         fnvHash(bytes, 0x811c9dc5) + fnvHash(bytes, 0x01000193);
+}
+
+export const getRefWords = (hash: string) =>
+  tx<{ words: Word[]; ts: number }>("refWords", "readonly",
+    (s) => s.get(`${hash}|${OCR_CACHE_VER}`))
+    .catch(() => undefined);
+
+export const putRefWords = (hash: string, words: Word[]) =>
+  tx("refWords", "readwrite", (s) =>
+    s.put({ words, ts: Date.now() }, `${hash}|${OCR_CACHE_VER}`))
+    .catch(() => {});
+
+// 아트웍은 영구 보관(자동 삭제 없음) — 사용자가 명시적으로 삭제할 때만 지워진다.
+// 재저장 시 기존 섹션 배정은 유지한다.
+export async function saveArtwork(hash: string, file: File): Promise<void> {
+  try {
+    const existing = await tx<Omit<ArtworkEntry, "hash">>(
+      "artworks", "readonly", (s) => s.get(hash));
+    await tx("artworks", "readwrite", (s) =>
+      s.put({ name: file.name, size: file.size, type: file.type,
+              blob: file, lastUsed: Date.now(),
+              section: existing?.section }, hash));
+  } catch { /* 캐시 실패는 기능에 영향 없음 */ }
+}
+
+export async function deleteArtwork(hash: string): Promise<void> {
+  try {
+    await tx("artworks", "readwrite", (s) => s.delete(hash));
+  } catch { /* 무시 */ }
+}
+
+export async function setArtworkSection(
+  hash: string, section: string | undefined): Promise<void> {
+  try {
+    const rec = await tx<Omit<ArtworkEntry, "hash">>(
+      "artworks", "readonly", (s) => s.get(hash));
+    if (!rec) return;
+    await tx("artworks", "readwrite", (s) => s.put({ ...rec, section }, hash));
+  } catch { /* 무시 */ }
+}
+
+// 이름(가나다·ABC) 오름차순 정렬로 반환.
+export async function listArtworks(): Promise<ArtworkEntry[]> {
+  try {
+    const db = await openDB();
+    return await new Promise((res, rej) => {
+      const t = db.transaction("artworks", "readonly");
+      const s = t.objectStore("artworks");
+      const out: ArtworkEntry[] = [];
+      const cur = s.openCursor();
+      cur.onsuccess = () => {
+        const c = cur.result;
+        if (c) {
+          out.push({ hash: String(c.key), ...(c.value as Omit<ArtworkEntry, "hash">) });
+          c.continue();
+        } else res(out.sort((a, b) => a.name.localeCompare(b.name, "ko")));
+      };
+      cur.onerror = () => rej(cur.error);
+    });
+  } catch { return []; }
+}
+
+// -------------------------------------------------------------- 섹션(폴더)
+// 보관함을 사용자가 정리할 수 있게 하는 섹션. 생성 순으로 나열.
+let sectionSeq = 0;
+
+export async function listSections(): Promise<Section[]> {
+  try {
+    const db = await openDB();
+    return await new Promise((res, rej) => {
+      const t = db.transaction("sections", "readonly");
+      const s = t.objectStore("sections");
+      const out: Section[] = [];
+      const cur = s.openCursor();
+      cur.onsuccess = () => {
+        const c = cur.result;
+        if (c) { out.push(c.value as Section); c.continue(); }
+        else res(out.sort((a, b) => a.createdAt - b.createdAt));
+      };
+      cur.onerror = () => rej(cur.error);
+    });
+  } catch { return []; }
+}
+
+export async function createSection(name: string): Promise<Section | null> {
+  try {
+    const sec: Section = {
+      id: `sec-${Date.now().toString(36)}-${++sectionSeq}`,
+      name, createdAt: Date.now(),
+    };
+    await tx("sections", "readwrite", (s) => s.put(sec, sec.id));
+    return sec;
+  } catch { return null; }
+}
+
+export async function renameSection(id: string, name: string): Promise<void> {
+  try {
+    const rec = await tx<Section>("sections", "readonly", (s) => s.get(id));
+    if (!rec) return;
+    await tx("sections", "readwrite", (s) => s.put({ ...rec, name }, id));
+  } catch { /* 무시 */ }
+}
+
+// 섹션을 지우면 그 안의 아트웍은 삭제하지 않고 미분류로 되돌린다.
+export async function deleteSection(id: string): Promise<void> {
+  try {
+    await tx("sections", "readwrite", (s) => s.delete(id));
+    const arts = await listArtworks();
+    await Promise.all(arts.filter((a) => a.section === id)
+      .map((a) => setArtworkSection(a.hash, undefined)));
+  } catch { /* 무시 */ }
+}
+
+// ---------------------------------------------------------------- 결과 세션
+// 분석 결과를 브라우저에 보존해 새로고침·재방문 후에도 이어서 볼 수 있게 한다.
+// 이미지는 Blob(JPEG/PNG)으로 저장하고, 화면 복원 시 캔버스로 되살린다.
+export interface StoredSet {
+  name: string;
+  setId?: number;
+  page?: number;
+  pageCount?: number;
+  error?: string;
+  result?: PipelineResult;
+  fb?: SetFb;
+  annotated?: Blob;
+  refImage?: Blob;
+  alignedImage?: Blob;
+  refFile?: { blob: Blob; name: string; type: string };
+  testFile?: { blob: Blob; name: string; type: string };
+}
+
+export interface StoredSession {
+  sets: StoredSet[];
+  analyzedAt: number; // 분석을 수행한 시각(epoch ms) — 결과 화면에 표시
+}
+
+export async function saveSession(
+  sets: StoredSet[], analyzedAt: number = Date.now()): Promise<void> {
+  try {
+    await tx("session", "readwrite", (s) =>
+      s.put({ sets, analyzedAt, savedAt: Date.now() }, "last"));
+  } catch { /* 저장 실패는 기능에 영향 없음 */ }
+}
+
+export async function loadSession(): Promise<StoredSession | null> {
+  try {
+    const rec = await tx<{ sets: StoredSet[]; analyzedAt?: number; savedAt: number }>(
+      "session", "readonly", (s) => s.get("last"));
+    if (!rec) return null;
+    if (Date.now() - rec.savedAt > SESSION_TTL_MS) {
+      clearSession();
+      return null;
+    }
+    // 구버전 레코드(analyzedAt 없음)는 저장 시각으로 대체
+    return { sets: rec.sets, analyzedAt: rec.analyzedAt ?? rec.savedAt };
+  } catch { return null; }
+}
+
+export async function clearSession(): Promise<void> {
+  try {
+    await tx("session", "readwrite", (s) => s.delete("last"));
+  } catch { /* 무시 */ }
+}
+
+export async function getArtworkFile(hash: string): Promise<File | null> {
+  try {
+    const rec = await tx<Omit<ArtworkEntry, "hash">>(
+      "artworks", "readonly", (s) => s.get(hash));
+    if (!rec) return null;
+    tx("artworks", "readwrite", (s) =>
+      s.put({ ...rec, lastUsed: Date.now() }, hash)).catch(() => {});
+    return new File([rec.blob], rec.name, { type: rec.type });
+  } catch { return null; }
+}

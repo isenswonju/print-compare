@@ -1,0 +1,21 @@
+# 의존성 · 빌드 산출물
+node_modules/
+web/node_modules/
+dist/
+web/dist/
+coverage/
+web/coverage/
+
+# 파이썬
+__pycache__/
+*.pyc
+.venv/
+
+# OS · 에디터
+.DS_Store
+*.log
+
+# 런타임 수집 데이터(개인/의료 라벨 데이터일 수 있어 커밋 금지)
+feedback/*.jsonl
+feedback/images/*
+webjobs/

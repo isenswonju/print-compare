@@ -60,6 +60,9 @@ a { color: var(--red); }
   height: 52px;
   display: inline-flex;
   align-items: center;
+  /* 하단 보더(활성 밑줄)만 있으면 텍스트가 위로 치우쳐 로고와 중앙선이 어긋난다.
+     동일한 투명 상단 보더로 대칭을 맞춰 세로 중앙선을 로고와 일치시킨다. */
+  border-top: 3px solid transparent;
   border-bottom: 3px solid transparent;
 }
 .gnb a.on { color: var(--red); border-bottom-color: var(--red); }

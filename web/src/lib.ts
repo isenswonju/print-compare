@@ -99,6 +99,12 @@ export function mapDisplay(f: Finding): Disp | null {
   }
 }
 
+// 세트 이름 변경 — 같은 setId의 모든 페이지 결과에 새 이름 적용(불변).
+export function applySetName(
+  results: ResultItem[], setId: number, name: string): ResultItem[] {
+  return results.map((r) => (r.setId === setId ? { ...r, name } : r));
+}
+
 export function boxesIntersect(a: number[], b: number[]): boolean {
   const [ax, ay, aw, ah] = a, [bx, by, bw, bh] = b;
   return !(ax + aw < bx || bx + bw < ax || ay + ah < by || by + bh < ay);

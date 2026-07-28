@@ -330,7 +330,8 @@ async function readBytes(b: Blob): Promise<Uint8Array> {
   const anyb = b as any;
   if (typeof anyb?.arrayBuffer === "function")
     return new Uint8Array(await anyb.arrayBuffer());
-  if (anyb instanceof Uint8Array) return anyb;
+  // 폴백 — 저장소가 arrayBuffer 없는 값(fake-indexeddb 등)을 돌려주면 실 Blob으로
+  // 한 겹 감싸 바이트를 얻는다.
   return new Uint8Array(await new Blob([anyb]).arrayBuffer());
 }
 

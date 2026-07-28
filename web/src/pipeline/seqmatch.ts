@@ -40,7 +40,11 @@ export class SequenceMatcher {
       }
       j2len = newj2len;
     }
-    // junk 없음(autojunk=False, isjunk=None)이므로 확장 단계는 동일 원소 확장만
+    // junk 없음(autojunk=False, isjunk=None)이므로 확장 단계는 동일 원소 확장만.
+    // 이 경우 위 j2len DP가 이미 최장 연속 일치를 찾으므로 아래 확장 루프의 본문은
+    // 절대 실행되지 않는다(조건이 항상 거짓). CPython difflib와의 1:1 포트를 위해
+    // 코드는 남겨두되, 도달 불가라 커버리지에서 제외한다.
+    /* v8 ignore start */
     while (besti > alo && bestj > blo && this.a[besti - 1] === this.b[bestj - 1]) {
       besti--; bestj--; bestsize++;
     }
@@ -48,6 +52,7 @@ export class SequenceMatcher {
            this.a[besti + bestsize] === this.b[bestj + bestsize]) {
       bestsize++;
     }
+    /* v8 ignore stop */
     return [besti, bestj, bestsize];
   }
 
@@ -65,7 +70,11 @@ export class SequenceMatcher {
         if (i + k < ahi && j + k < bhi) queue.push([i + k, ahi, j + k, bhi]);
       }
     }
+    // 블록들은 a에서 서로 겹치지 않는 구간이라 x[0]가 같은 경우는 없다 →
+    // 타이브레이크(|| x[1]-y[1])는 difflib와의 동치를 위해 두되 도달하지 않는다.
+    /* v8 ignore start */
     blocks.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+    /* v8 ignore stop */
     // 인접 블록 병합
     let i1 = 0, j1 = 0, k1 = 0;
     const merged: Block[] = [];

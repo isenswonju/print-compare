@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearSession, createSection, deleteArtwork, deleteSection, exportLibrary,
   getArtworkFile, getRefWords, hashFile, importLibrary, listArtworks,
-  listSections, loadSession, putRefWords, renameSection, saveArtwork,
-  saveSession, setArtworkSection, type StoredSet,
+  listSections, loadSession, putRefWords, renameSection,
+  requestPersistentStorage, saveArtwork, saveSession, setArtworkSection,
+  storageEstimate, type StoredSet,
 } from "./cache.ts";
 import type { Word } from "./types.ts";
 
@@ -227,5 +228,106 @@ describe("hashFile", () => {
     vi.stubGlobal("crypto", {}); // subtle 없음 → http 사내망 폴백 경로
     const h = await hashFile(file("a.png", "data"));
     expect(h.startsWith("fnv-")).toBe(true);
+  });
+});
+
+// 세션 스토어에 원시 레코드를 직접 넣는 헬퍼(레거시 포맷 재현용).
+function rawPutSession(value: unknown): Promise<void> {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open("artwork-compare-cache", 3);
+    req.onsuccess = () => {
+      const db = req.result;
+      const t = db.transaction("session", "readwrite");
+      t.objectStore("session").put(value, "last");
+      t.oncomplete = () => res();
+      t.onerror = () => rej(t.error);
+    };
+    req.onerror = () => rej(req.error);
+  });
+}
+
+describe("cache — 경계·방어 분기", () => {
+  it("setArtworkSection: 없는 해시는 조용히 무시(rec 없음)", async () => {
+    await setArtworkSection("no-such-hash", "sec-x");
+    expect((await listArtworks()).some((a) => a.hash === "no-such-hash")).toBe(false);
+  });
+
+  it("renameSection: 없는 id는 조용히 무시(rec 없음)", async () => {
+    await renameSection("no-such-id", "새이름");
+    expect((await listSections()).some((s) => s.id === "no-such-id")).toBe(false);
+  });
+
+  it("loadSession: 구버전 레코드(analyzedAt 없음)는 savedAt으로 대체", async () => {
+    const savedAt = Date.now();
+    await rawPutSession({ sets: [{ name: "레거시" }], savedAt }); // analyzedAt 없음
+    const loaded = await loadSession();
+    expect(loaded!.sets[0].name).toBe("레거시");
+    expect(loaded!.analyzedAt).toBe(savedAt); // analyzedAt ?? savedAt
+  });
+
+  it("requestPersistentStorage: Storage API 없으면 false", async () => {
+    // jsdom navigator에는 storage가 없다
+    expect(await requestPersistentStorage()).toBe(false);
+  });
+  it("requestPersistentStorage: 이미 persisted면 즉시 true", async () => {
+    vi.stubGlobal("navigator", { storage: {
+      persist: async () => false, persisted: async () => true } });
+    expect(await requestPersistentStorage()).toBe(true);
+  });
+  it("requestPersistentStorage: 승격 요청 결과를 반환", async () => {
+    vi.stubGlobal("navigator", { storage: {
+      persist: async () => true, persisted: async () => false } });
+    expect(await requestPersistentStorage()).toBe(true);
+  });
+  it("requestPersistentStorage: 예외는 false로 삼킨다", async () => {
+    vi.stubGlobal("navigator", { storage: {
+      persist: () => { throw new Error("boom"); }, persisted: async () => false } });
+    expect(await requestPersistentStorage()).toBe(false);
+  });
+
+  it("storageEstimate: estimate API 없으면 null", async () => {
+    expect(await storageEstimate()).toBeNull();
+  });
+  it("storageEstimate: usage/quota/persisted를 반환", async () => {
+    vi.stubGlobal("navigator", { storage: {
+      estimate: async () => ({ usage: 100, quota: 1000 }),
+      persisted: async () => true } });
+    expect(await storageEstimate()).toEqual({ usage: 100, quota: 1000, persisted: true });
+  });
+  it("storageEstimate: usage/quota 생략·persisted 없으면 0·false 기본", async () => {
+    vi.stubGlobal("navigator", { storage: { estimate: async () => ({}) } });
+    expect(await storageEstimate()).toEqual({ usage: 0, quota: 0, persisted: false });
+  });
+  it("storageEstimate: 예외는 null로 삼킨다", async () => {
+    vi.stubGlobal("navigator", { storage: {
+      estimate: () => { throw new Error("boom"); } } });
+    expect(await storageEstimate()).toBeNull();
+  });
+
+  it("importLibrary replace=true는 기존 보관함을 비우고 복원", async () => {
+    const old = await createSection("기존섹션");
+    await saveArtwork("replOld", file("old.png"));
+    const backup = {
+      version: 1, exportedAt: 1,
+      sections: [{ id: "sec-new", name: "새섹션", createdAt: 1 }],
+      artworks: [{ hash: "replNew", name: "n.png", size: 1, type: "image/png",
+                   section: "sec-new", dataB64: btoa("X") }],
+    };
+    await importLibrary(backup, { replace: true });
+    const arts = await listArtworks(), secs = await listSections();
+    expect(arts.some((a) => a.hash === "replOld")).toBe(false); // 기존 삭제
+    expect(arts.some((a) => a.hash === "replNew")).toBe(true);
+    expect(secs.some((s) => s.id === old!.id)).toBe(false);      // 기존 섹션 삭제
+    expect(secs.some((s) => s.id === "sec-new")).toBe(true);
+  });
+
+  it("importLibrary: sections 없는 백업도 안전(?? [] 분기)", async () => {
+    const backup = { version: 1, exportedAt: 1, artworks: [
+      { hash: "noSecArt", name: "a.png", size: 1, type: "image/png",
+        dataB64: btoa("Y") }] };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = await importLibrary(backup as any);
+    expect(r.sections).toBe(0);
+    expect((await listArtworks()).some((a) => a.hash === "noSecArt")).toBe(true);
   });
 });

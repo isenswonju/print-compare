@@ -48,4 +48,37 @@ describe("wordsFromTesseract", () => {
     const words = wordsFromTesseract(data, 40);
     expect(words.map((w) => w.line[2])).toEqual([1, 1, 2]);
   });
+
+  it("text 누락(undefined)·confidence 누락은 제외(빈문자·conf<minConf)", () => {
+    const data = {
+      blocks: [{ paragraphs: [{ lines: [{ words: [
+        { bbox: bbox(0, 0, 10, 10) },                     // text undefined → "" → 제외
+        { text: "noconf", bbox: bbox(0, 0, 10, 10) },     // confidence undefined → -1 → 제외
+        { text: "keep", confidence: 80, bbox: bbox(0, 0, 10, 10) },
+      ] }] }] }],
+    };
+    expect(wordsFromTesseract(data, 40).map((w) => w.text)).toEqual(["keep"]);
+  });
+
+  it("빈 blocks/paragraphs/lines 구조도 안전(|| [] 분기)", () => {
+    const data = {
+      blocks: [
+        {},                                    // paragraphs 없음
+        { paragraphs: [{}] },                  // lines 없음
+        { paragraphs: [{ lines: [{}] }] },     // words 없음
+      ],
+    };
+    expect(wordsFromTesseract(data, 40)).toEqual([]);
+  });
+
+  it("blocks·words 둘 다 없으면 빈 배열", () => {
+    expect(wordsFromTesseract({}, 40)).toEqual([]);
+  });
+
+  it("빈 blocks 배열이면 flat words 폴백 경로로", () => {
+    const data = { blocks: [], words: [
+      { text: "flat", confidence: 90, bbox: bbox(0, 0, 5, 5), line: {} },
+    ] };
+    expect(wordsFromTesseract(data, 40).map((w) => w.text)).toEqual(["flat"]);
+  });
 });

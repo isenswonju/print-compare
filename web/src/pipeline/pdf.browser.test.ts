@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ensureRaster, ensureRasterPages, pdfPageCount, rasterizePdf,
          rasterizePdfPages } from "./pdf.ts";
 import { SAMPLE_PDF_2PAGE_BASE64, SAMPLE_PDF_BASE64 } from "./__fixtures__.ts";
@@ -110,5 +110,32 @@ describe("다중 페이지 PDF (실 브라우저)", () => {
     const pages = await ensureRasterPages(img);
     expect(pages).toHaveLength(1);
     expect(pages[0]).toBe(img);
+  });
+});
+
+describe("렌더 경계·실패 처리 (실 브라우저)", () => {
+  it("과대 dpi는 캔버스 상한(MAX_DIM=12000) 내로 자동 축소하고 로그를 남긴다", async () => {
+    const logs: string[] = [];
+    // 160pt * 8000/72 ≈ 17777px > 12000 → 상한으로 캡
+    const png = await rasterizePdf(samplePdf(), 8000, (m) => logs.push(m));
+    const bmp = await createImageBitmap(png);
+    expect(Math.max(bmp.width, bmp.height)).toBeLessThanOrEqual(12000);
+    expect(logs.some((l) => l.includes("dpi로 렌더"))).toBe(true);
+  });
+
+  it("렌더 결과를 Blob으로 만들지 못하면 에러", async () => {
+    const spy = vi.spyOn(HTMLCanvasElement.prototype, "toBlob")
+      .mockImplementation(function (cb: BlobCallback) { cb(null); });
+    await expect(rasterizePdf(samplePdf())).rejects.toThrow(/이미지로 만들지/);
+    spy.mockRestore();
+  });
+
+  it("손상된 PDF는 거부되고, 직렬화 큐는 복구되어 다음 변환은 정상", async () => {
+    const bad = new File([new Uint8Array([1, 2, 3, 4])], "bad.pdf",
+      { type: "application/pdf" });
+    await expect(rasterizePdfPages(bad)).rejects.toThrow(); // fn 거부 → 큐 에러 콜백
+    // 큐가 복구되어 이후 정상 변환
+    const png = await rasterizePdf(samplePdf());
+    expect(png.type).toBe("image/png");
   });
 });

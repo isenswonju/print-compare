@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  applySetName, boxesIntersect, computeDefects, computeFeedbackEndpoints,
-  csvEsc, displayCsv, feedbackCsv, feedbackTargets, fmtDateTime, fmtMB,
-  mapDisplay, sevCounts, slimPayload, type FeedbackPayload,
+  applySetName, boxesIntersect, buildFeedbackPayload, computeDefects,
+  computeFeedbackEndpoints, csvEsc, displayCsv, download, drawLensInto,
+  feedbackCsv, feedbackTargets, flushFbQueue, fmtDateTime, fmtMB, loadFbQueue,
+  mapDisplay, restoreResults, saveFbQueue, serializeResults, sevCounts,
+  slimPayload, trySendFeedback, type FeedbackPayload,
 } from "./lib.ts";
 import type { DispFinding, Finding, ResultItem } from "./types.ts";
 
@@ -66,6 +68,10 @@ describe("mapDisplay", () => {
       note: "OCR 불일치: A→B" }));
     expect(d).toMatchObject({ ktype: "인쇄 오류", severity: "critical" });
     expect(d!.note).toContain("(A→B)");
+  });
+  it("text_mismatch에 상세(OCR 불일치:)가 없으면 괄호 없이", () => {
+    const d = mapDisplay(finding({ id: 1, type: "text_mismatch", note: "노트만" }));
+    expect(d!.note).toBe("인쇄 내용 불일치"); // detail 없음 → 괄호 미표기
   });
   it("showthrough·trim_mark는 표시 제외(null)", () => {
     expect(mapDisplay(finding({ id: 1, type: "showthrough" }))).toBeNull();
@@ -155,7 +161,7 @@ describe("CSV", () => {
     expect(csvEsc('a"b')).toBe('"a""b"');
   });
 
-  it("displayCsv는 BOM+헤더+행", () => {
+  it("displayCsv는 BOM+헤더+행(피드백 있음)", () => {
     const csv = displayCsv(defects,
       { defects: { 1: { fp: true, comment: "먼지" } } });
     expect(csv.startsWith("﻿")).toBe(true);
@@ -164,20 +170,42 @@ describe("CSV", () => {
     expect(csv).toContain("오탐: 먼지");
   });
 
-  it("feedbackCsv는 오탐·미검출 행을 낸다", () => {
-    const items: ResultItem[] = [{
-      name: "세트1", setId: 1, page: 1, pageCount: 1,
-      fb: {
-        defects: { 1: { fp: true, cause: "먼지", comment: "노이즈",
-                        ktype: "가독성", bbox: [1, 2, 3, 4] } },
-        missed: [{ x: 5, y: 6, cause: "누락", comment: "못잡음" }],
+  it("displayCsv는 피드백 인자가 없어도 동작(피드백 열 비움)", () => {
+    const csv = displayCsv(defects); // fb 없음 → 피드백 텍스트 ""
+    expect(csv).toContain("인쇄 누락");
+    expect(csv.trim().split("\r\n")).toHaveLength(2); // 헤더 + 1행
+  });
+
+  it("displayCsv: 의견(fp=false)·코멘트 없음도 처리(빈 코멘트 분기)", () => {
+    const csv = displayCsv(defects, { defects: { 1: { fp: false, comment: "" } } });
+    expect(csv).toContain("의견"); // fp false 분기 + comment "" 분기
+  });
+
+  it("feedbackCsv: fb 없는 세트는 건너뛰고, 오탐/의견/미검출을 모두 낸다", () => {
+    const items: ResultItem[] = [
+      { name: "fb없음", setId: 9, page: 1, pageCount: 1 }, // fb 없음 → continue
+      {
+        name: "세트1", setId: 1, page: 1, pageCount: 1,
+        fb: {
+          defects: {
+            1: { fp: true, cause: "먼지", comment: "노이즈", ktype: "가독성",
+                 bbox: [1, 2, 3, 4] },
+            2: { fp: false, cause: "", comment: "의견", ktype: "인쇄",
+                 bbox: [5, 6, 7, 8] }, // 의견 + 원인 없음(||"")
+          },
+          missed: [{ x: 5, y: 6, comment: "못잡음" }], // cause 없음(||"")
+        },
       },
-    }];
+    ];
     const csv = feedbackCsv(items);
-    expect(csv).toContain("세트,구분,번호,유형,원인,x,y,w,h,코멘트");
     expect(csv).toContain("오탐");
+    expect(csv).toContain("의견");
     expect(csv).toContain("미검출");
     expect(csv).toContain("M1");
+  });
+
+  it("feedbackCsv: 아무 피드백도 없으면 헤더만", () => {
+    expect(feedbackCsv([]).trim().split("\r\n")).toHaveLength(1);
   });
 });
 
@@ -191,5 +219,125 @@ describe("slimPayload", () => {
     expect(slim.items[0]).not.toHaveProperty("refImage");
     expect(slim.items[0]).not.toHaveProperty("testImage");
     expect(slim.items[0]).toMatchObject({ keep: 1, imagesDropped: true });
+  });
+});
+
+// ------------------------------------------------- 피드백 큐·전송·결과 보존(unit)
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
+
+describe("피드백 보류 큐", () => {
+  it("saveFbQueue: 비었으면 removeItem, 있으면 setItem, 실패는 false", () => {
+    expect(saveFbQueue([])).toBe(true);
+    expect(localStorage.getItem("artwork-fb-queue")).toBeNull();
+    const q = [{ app: "x", version: "1", sentAt: "", origin: "", items: [] }];
+    expect(saveFbQueue(q)).toBe(true);
+    expect(loadFbQueue()).toHaveLength(1);
+    // setItem이 예외(용량 초과 등) → false
+    vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new Error("quota"); });
+    expect(saveFbQueue(q)).toBe(false);
+  });
+
+  it("loadFbQueue: 깨진 JSON은 빈 배열로", () => {
+    localStorage.setItem("artwork-fb-queue", "{not json");
+    expect(loadFbQueue()).toEqual([]);
+  });
+
+  it("flushFbQueue: 빈 큐는 0", async () => {
+    expect(await flushFbQueue()).toBe(0);
+  });
+
+  it("flushFbQueue: 성공분은 보내고 실패분은 남긴다", async () => {
+    const p = (n: number): FeedbackPayload =>
+      ({ app: "x", version: "1", sentAt: "", origin: "", items: [{ n }] });
+    saveFbQueue([p(1), p(2)]);
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      call++;
+      return { ok: call === 1 } as Response; // 첫 건만 성공
+    }));
+    const sent = await flushFbQueue();
+    expect(sent).toBe(1);
+    expect(loadFbQueue()).toHaveLength(1); // 실패분 1건 남음
+  });
+});
+
+describe("trySendFeedback", () => {
+  const payload: FeedbackPayload = { app: "x", version: "1", sentAt: "", origin: "", items: [] };
+  it("ok면 성공한 URL 반환", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true } as Response)));
+    expect(await trySendFeedback(payload, ["/a", "/b"])).toBe("/a");
+  });
+  it("실패면 다음 후보로, 다 실패면 null", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false } as Response)));
+    expect(await trySendFeedback(payload, ["/a", "/b"])).toBeNull();
+  });
+  it("예외는 삼키고 다음 후보(모두 예외면 null)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("net"); }));
+    expect(await trySendFeedback(payload, ["/a"])).toBeNull();
+  });
+  it("대상이 없으면 null", async () => {
+    expect(await trySendFeedback(payload, [])).toBeNull();
+  });
+});
+
+describe("serializeResults / restoreResults — 캔버스 없는 경로", () => {
+  it("serializeResults: falsy 항목은 건너뛰고 error 항목은 그대로 저장", async () => {
+    const results = [
+      null as unknown as ResultItem,
+      { name: "실패", setId: 1, page: 1, pageCount: 1, error: "분석 실패" },
+    ];
+    const out = await serializeResults(results);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ name: "실패", error: "분석 실패" });
+  });
+
+  it("restoreResults: 복원 불가 레코드는 error 항목(+태그 기본값 보정)", async () => {
+    const restored = await restoreResults([
+      { name: "구버전" },                       // setId/page/pageCount 없음 → 기본값
+      { name: "명시실패", error: "원래 실패" },  // s.error 우선
+    ]);
+    expect(restored[0]).toMatchObject({
+      name: "구버전", setId: 0, page: 1, pageCount: 1,
+      error: "복원할 수 없는 결과입니다.",
+    });
+    expect(restored[1].error).toBe("원래 실패");
+  });
+});
+
+describe("drawLensInto — 방어", () => {
+  it("src나 canvas가 없으면 아무 것도 하지 않는다", () => {
+    expect(() => drawLensInto(null, null, 0, 0)).not.toThrow();
+    const c = { getContext: () => { throw new Error("불려선 안 됨"); } } as unknown as HTMLCanvasElement;
+    expect(() => drawLensInto(null, c, 0, 0)).not.toThrow(); // src 없음 → 조기 반환
+  });
+});
+
+describe("download (unit)", () => {
+  it("앵커를 만들어 click하고 잠시 뒤 objectURL을 정리한다", () => {
+    vi.useFakeTimers();
+    const revoke = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL: () => "blob:x", revokeObjectURL: revoke });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    download("결과.json", new Blob(["x"], { type: "application/json" }));
+    expect(click).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(10000); // setTimeout 콜백 → revokeObjectURL
+    expect(revoke).toHaveBeenCalledWith("blob:x");
+    vi.useRealTimers();
+  });
+});
+
+describe("buildFeedbackPayload — 건너뛰기(캔버스 불필요)", () => {
+  it("error·fb없음·캔버스없음 항목은 items에서 제외", async () => {
+    const payload = await buildFeedbackPayload([
+      { name: "err", setId: 1, page: 1, pageCount: 1, error: "실패" },
+      { name: "nofb", setId: 1, page: 1, pageCount: 1 },
+      { name: "nocanvas", setId: 1, page: 1, pageCount: 1,
+        fb: { defects: {}, missed: [] } },
+    ]);
+    expect(payload.items).toEqual([]);
+    expect(payload.app).toBe("artwork-compare-web");
+    expect(typeof payload.sentAt).toBe("string");
   });
 });

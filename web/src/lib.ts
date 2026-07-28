@@ -64,7 +64,11 @@ const tessUrl = (p: string) =>
 
 export async function ocrCanvas(canvas: HTMLCanvasElement,
                                 onLog?: (m: string) => void): Promise<Word[]> {
+  // Vite가 동적 import에 주입하는 ESM interop 가드(default 유무 분기)는 도달
+  // 불가한 툴링 분기라 커버리지에서 제외한다.
+  /* v8 ignore start */
   const Tesseract = await import("tesseract.js");
+  /* v8 ignore stop */
   const worker = await Tesseract.createWorker("eng", 1, {
     workerPath: tessUrl("worker.min.js"),
     corePath: tessUrl("core"),

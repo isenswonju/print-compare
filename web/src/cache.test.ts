@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  clearSession, createSection, deleteArtwork, deleteSection, getArtworkFile,
-  getRefWords, hashFile, listArtworks, listSections, loadSession, putRefWords,
-  renameSection, saveArtwork, saveSession, setArtworkSection, type StoredSet,
+  clearSession, createSection, deleteArtwork, deleteSection, exportLibrary,
+  getArtworkFile, getRefWords, hashFile, importLibrary, listArtworks,
+  listSections, loadSession, putRefWords, renameSection, saveArtwork,
+  saveSession, setArtworkSection, type StoredSet,
 } from "./cache.ts";
 import type { Word } from "./types.ts";
 
@@ -166,6 +167,52 @@ describe("섹션(폴더) CRUD + 아트웍 배정", () => {
     await deleteSection(top!.id);
     const list = await listSections();
     expect(list.find((s) => s.id === sub!.id)!.parentId).toBeUndefined();
+  });
+});
+
+describe("보관함 백업/복원(안 C)", () => {
+  // 바이너리 내용 왕복은 실브라우저/E2E가 보증한다(jsdom+fake-indexeddb는 Blob을
+  // structuredClone하지 못해 IDB 왕복에서 바이트가 유실됨). 여기서는 백업의
+  // 메타데이터·섹션 구조·소속이 온전히 내보내지고 되살아나는지 검증한다.
+  it("내보내기→(삭제)→가져오기: 아트웍 메타·섹션·소속 보존", async () => {
+    const sec = await createSection("백업섹션");
+    await saveArtwork("bk1", file("라벨.png", "PNGDATA1"));
+    await setArtworkSection("bk1", sec!.id);
+    await saveArtwork("bk2", file("표지.png", "PNGDATA2")); // 미분류
+
+    const backup = await exportLibrary();
+    expect(backup.version).toBe(1);
+    const names = backup.artworks.map((a) => a.name);
+    expect(names).toContain("라벨.png");
+    expect(names).toContain("표지.png");
+    expect(backup.artworks.find((a) => a.hash === "bk1")!.section).toBe(sec!.id);
+    expect(typeof backup.artworks[0].dataB64).toBe("string"); // 바이너리 필드 존재
+
+    await deleteArtwork("bk1");
+    await deleteArtwork("bk2");
+    await deleteSection(sec!.id);
+
+    await importLibrary(backup);
+    const arts = await listArtworks();
+    expect(arts.some((a) => a.hash === "bk2")).toBe(true);
+    expect(arts.find((a) => a.hash === "bk1")!.section).toBe(sec!.id); // 소속 복원
+    expect((await listSections()).some((s) => s.id === sec!.id)).toBe(true);
+  });
+
+  it("중첩 섹션 구조(parentId)가 백업·복원으로 보존된다", async () => {
+    const p = await createSection("상위");
+    const c = await createSection("하위", p!.id);
+    const backup = await exportLibrary();
+    await deleteSection(c!.id);
+    await deleteSection(p!.id);
+    await importLibrary(backup);
+    const list = await listSections();
+    expect(list.find((s) => s.id === c!.id)!.parentId).toBe(p!.id);
+  });
+
+  it("형식이 잘못된 백업은 에러", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await expect(importLibrary({ bogus: true } as any)).rejects.toThrow();
   });
 });
 

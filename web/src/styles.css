@@ -549,6 +549,16 @@ details summary { cursor: pointer; }
   font-size: 0.74rem; padding: 2px 8px; cursor: pointer; color: var(--muted);
 }
 .sec-add:hover { border-color: var(--red); color: var(--red); }
+/* 보관함 백업/복원 도구 */
+.lib-tools { display: flex; gap: 6px; margin-bottom: 8px; }
+.lib-tools button {
+  flex: 1; border: 1px solid var(--line); background: #fff; color: #555;
+  border-radius: 6px; padding: 4px 6px; font-size: 0.74rem; cursor: pointer;
+}
+.lib-tools button:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
+.lib-tools button:disabled { opacity: 0.4; cursor: default; }
+.lib-status { font-size: 0.74rem; color: var(--muted); margin: 0 0 8px;
+  padding: 4px 6px; background: #f6f7f9; border-radius: 6px; }
 .sec-edit { display: flex; gap: 4px; margin-bottom: 8px; }
 .sec-edit input { flex: 1; min-width: 0; padding: 4px 6px; font-size: 0.8rem;
   border: 1px solid var(--line); border-radius: 6px; }

@@ -293,3 +293,87 @@ export async function getArtworkFile(hash: string): Promise<File | null> {
     return new File([rec.blob], rec.name, { type: rec.type });
   } catch { return null; }
 }
+
+// ---------------------------------------------------- 보관함 백업/복원(안 C)
+// 서버 없이도 유실에 대비하는 최소 안전망 — 보관함 전체(아트웍 원본 + 섹션
+// 구조)를 파일 하나로 내보내고 되살린다. 이미지가 이미 압축(PNG/PDF)이라
+// zip 압축 이득이 적어 의존성 없이 JSON+base64 단일 파일로 저장한다.
+export const LIBRARY_BACKUP_VERSION = 1;
+
+export interface LibraryBackup {
+  version: number;
+  exportedAt: number;
+  sections: Section[];
+  artworks: { hash: string; name: string; size: number; type: string;
+              section?: string; dataB64: string }[];
+}
+
+// 큰 바이너리도 콜스택 넘치지 않게 청크 단위로 base64 인코딩.
+function bytesToB64(bytes: Uint8Array): string {
+  let bin = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK)
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  return btoa(bin);
+}
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// Blob→바이트. 브라우저는 arrayBuffer()가 항상 있지만, 저장소가 돌려준 값이
+// 그렇지 않은 환경(fake-indexeddb 등)도 있어 한 겹 감싸는 폴백을 둔다.
+async function readBytes(b: Blob): Promise<Uint8Array> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const anyb = b as any;
+  if (typeof anyb?.arrayBuffer === "function")
+    return new Uint8Array(await anyb.arrayBuffer());
+  if (anyb instanceof Uint8Array) return anyb;
+  return new Uint8Array(await new Blob([anyb]).arrayBuffer());
+}
+
+// 보관함 전체를 백업 객체로 내보낸다(다운로드는 호출측에서 Blob으로).
+export async function exportLibrary(): Promise<LibraryBackup> {
+  const [arts, secs] = await Promise.all([listArtworks(), listSections()]);
+  const artworks = await Promise.all(arts.map(async (a) => ({
+    hash: a.hash, name: a.name, size: a.size, type: a.type,
+    section: a.section,
+    dataB64: bytesToB64(await readBytes(a.blob)),
+  })));
+  return { version: LIBRARY_BACKUP_VERSION, exportedAt: Date.now(),
+           sections: secs, artworks };
+}
+
+// 섹션 upsert — 원래 id를 보존해 parentId 링크가 유지되게 한다(복원 전용).
+async function putSection(sec: Section): Promise<void> {
+  try { await tx("sections", "readwrite", (s) => s.put(sec, sec.id)); }
+  catch { /* 무시 */ }
+}
+
+// 백업을 되살린다. 기본은 병합(기존 보관함에 더한다) — 같은 해시/섹션 id는
+// 덮어쓴다. replace=true면 기존 보관함을 먼저 비운다.
+export async function importLibrary(
+  backup: LibraryBackup, opts: { replace?: boolean } = {}):
+  Promise<{ artworks: number; sections: number }> {
+  if (!backup || typeof backup !== "object" || !Array.isArray(backup.artworks))
+    throw new Error("백업 파일 형식이 올바르지 않습니다.");
+  if (opts.replace) {
+    for (const s of await listSections()) await deleteSection(s.id);
+    for (const a of await listArtworks()) await deleteArtwork(a.hash);
+  }
+  for (const sec of backup.sections ?? []) await putSection(sec);
+  let n = 0;
+  for (const a of backup.artworks) {
+    try {
+      const blob = new Blob([b64ToBytes(a.dataB64).buffer as ArrayBuffer],
+                            { type: a.type });
+      await tx("artworks", "readwrite", (s) =>
+        s.put({ name: a.name, size: a.size, type: a.type, blob,
+                lastUsed: Date.now(), section: a.section }, a.hash));
+      n++;
+    } catch { /* 개별 실패는 건너뛴다 */ }
+  }
+  return { artworks: n, sections: (backup.sections ?? []).length };
+}

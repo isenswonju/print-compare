@@ -3,10 +3,10 @@
 // 우측 상세(마스터-디테일). 다중 세트는 메모리가 허용하면 동시 2세트 병렬.
 import React, { useEffect, useRef, useState } from "react";
 import { clearSession, createSection, deleteArtwork, deleteSection,
-         getArtworkFile, hashFile, listArtworks, listSections, loadSession,
-         renameSection, requestPersistentStorage, saveArtwork, saveSession,
-         setArtworkSection, type ArtworkEntry, type Section,
-         type StoredSet } from "./cache.ts";
+         exportLibrary, getArtworkFile, hashFile, importLibrary, listArtworks,
+         listSections, loadSession, renameSection, requestPersistentStorage,
+         saveArtwork, saveSession, setArtworkSection, type ArtworkEntry,
+         type LibraryBackup, type Section, type StoredSet } from "./cache.ts";
 import { MultiDropZone, FeedbackModal, ResultDetail,
          type ModalState } from "./components.tsx";
 import { applySetName, buildFeedbackPayload, download, feedbackCsv, flushFbQueue,
@@ -61,6 +61,8 @@ export default function App() {
   const [addingSection, setAddingSection] = useState(false);
   const [sectionDraft, setSectionDraft] = useState("");
   const [editingSection, setEditingSection] = useState<string | null>(null);
+  const [libStatus, setLibStatus] = useState(""); // 백업/복원 안내
+  const libImportRef = useRef<HTMLInputElement>(null);
   const [dragOverSec, setDragOverSec] = useState<string | null>(null);
   const [editingSet, setEditingSet] = useState<number | null>(null); // 이름 편집 중인 setId
   const [restored, setRestored] = useState(false);
@@ -227,6 +229,32 @@ export default function App() {
   };
   const onSetSection = async (hash: string, section: string) => {
     await setArtworkSection(hash, section || undefined); refreshLibrary();
+  };
+
+  // 보관함 백업/복원(안 C) — 서버 없이도 유실에 대비하는 최소 안전망.
+  const onExportLibrary = async () => {
+    setLibStatus("백업 파일 만드는 중…");
+    try {
+      const backup = await exportLibrary();
+      const stamp = fmtDateTime(backup.exportedAt).replace(/[^\d]/g, "");
+      download(`보관함백업_${stamp}.json`,
+        new Blob([JSON.stringify(backup)], { type: "application/json" }));
+      setLibStatus(`백업 완료 — 아트웍 ${backup.artworks.length}개 · ` +
+        `섹션 ${backup.sections.length}개`);
+    } catch (e) {
+      setLibStatus("백업 실패: " + String((e as Error).message || e));
+    }
+  };
+  const onImportLibrary = async (file: File) => {
+    setLibStatus("복원 중…");
+    try {
+      const backup = JSON.parse(await file.text()) as LibraryBackup;
+      const r = await importLibrary(backup); // 병합(기존에 더함)
+      await refreshLibrary();
+      setLibStatus(`복원 완료 — 아트웍 ${r.artworks}개 · 섹션 ${r.sections}개 반영`);
+    } catch (e) {
+      setLibStatus("복원 실패: " + String((e as Error).message || e));
+    }
   };
 
   // 보관함 아트웍 한 행: 클릭해 투입 + 드래그해서 섹션 이동 + 삭제.
@@ -881,6 +909,21 @@ export default function App() {
                         : "최상위 섹션을 만듭니다"}
                       onClick={() => setAddingSection(true)}>＋ 섹션</button>
             </div>
+            <div className="lib-tools">
+              <button type="button" disabled={running}
+                      title="보관함 전체를 파일로 백업(유실 대비)"
+                      onClick={onExportLibrary}>⬇ 백업</button>
+              <button type="button" disabled={running}
+                      title="백업 파일에서 보관함 복원(기존에 병합)"
+                      onClick={() => libImportRef.current?.click()}>⬆ 복원</button>
+              <input ref={libImportRef} type="file" accept=".json,application/json"
+                     hidden onChange={(e) => {
+                       const f = e.target.files?.[0];
+                       if (f) onImportLibrary(f);
+                       e.target.value = "";
+                     }} />
+            </div>
+            {libStatus && <p className="lib-status">{libStatus}</p>}
             {selectedSection && (
               <div className="sec-selbar">
                 <span>선택됨: <b>{sections.find((s) => s.id === selectedSection)?.name}</b>

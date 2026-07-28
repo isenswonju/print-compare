@@ -64,6 +64,7 @@ export default function App() {
   const [sectionDraft, setSectionDraft] = useState("");
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [libStatus, setLibStatus] = useState(""); // 백업/복원 안내
+  const [hoverTip, setHoverTip] = useState(""); // 백업/복원 버튼 호버 설명
   const libImportRef = useRef<HTMLInputElement>(null);
   // 서버 보관함 동기화 — 비번 입력 프롬프트 상태
   const [serverAct, setServerAct] = useState<"push" | "pull" | null>(null);
@@ -287,6 +288,15 @@ export default function App() {
       setServerBusy(false);
     }
   };
+
+  // 백업/복원 버튼 호버·포커스 시 간단한 설명을 아래 안내 박스로 보여준다
+  // (좁은 사이드바 + overflow 클리핑 때문에 떠 있는 툴팁 대신 인라인 박스).
+  const tip = (t: string) => ({
+    onMouseEnter: () => setHoverTip(t),
+    onMouseLeave: () => setHoverTip((c) => (c === t ? "" : c)),
+    onFocus: () => setHoverTip(t),
+    onBlur: () => setHoverTip((c) => (c === t ? "" : c)),
+  });
 
   // 보관함 아트웍 한 행: 클릭해 투입 + 드래그해서 섹션 이동 + 삭제.
   const renderArtwork = (a: ArtworkEntry) => (
@@ -941,12 +951,13 @@ export default function App() {
                       onClick={() => setAddingSection(true)}>＋ 섹션</button>
             </div>
             <div className="lib-tools">
+              <button type="button" disabled={running} onClick={onExportLibrary}
+                      {...tip("보관함 전체(원본 + 섹션)를 파일 하나로 내려받아 둡니다. 유실에 대비한 로컬 백업이에요.")}>
+                ⬇ 백업</button>
               <button type="button" disabled={running}
-                      title="보관함 전체를 파일로 백업(유실 대비)"
-                      onClick={onExportLibrary}>⬇ 백업</button>
-              <button type="button" disabled={running}
-                      title="백업 파일에서 보관함 복원(기존에 병합)"
-                      onClick={() => libImportRef.current?.click()}>⬆ 복원</button>
+                      onClick={() => libImportRef.current?.click()}
+                      {...tip("백업 파일을 골라 보관함을 되살립니다. 기존 항목은 지우지 않고 병합돼요.")}>
+                ⬆ 복원</button>
               <input ref={libImportRef} type="file" accept=".json,application/json"
                      hidden onChange={(e) => {
                        const f = e.target.files?.[0];
@@ -957,15 +968,16 @@ export default function App() {
             {hasLibraryServer && (
               <div className="lib-tools">
                 <button type="button" disabled={running || serverBusy}
-                        title="로컬 보관함을 공용 서버에 백업(팀 공유)"
-                        onClick={() => { setServerAct("push"); setServerPw(""); }}>
+                        onClick={() => { setServerAct("push"); setServerPw(""); }}
+                        {...tip("로컬 보관함을 공용 서버에 올려 팀과 공유합니다. 비밀번호가 필요해요.")}>
                   ☁ 서버백업</button>
                 <button type="button" disabled={running || serverBusy}
-                        title="공용 서버의 최신 백업을 불러와 병합"
-                        onClick={() => { setServerAct("pull"); setServerPw(""); }}>
+                        onClick={() => { setServerAct("pull"); setServerPw(""); }}
+                        {...tip("공용 서버의 최신 백업을 받아 로컬 보관함에 병합합니다. 비밀번호가 필요해요.")}>
                   ☁ 불러오기</button>
               </div>
             )}
+            {hoverTip && <p className="lib-tip" role="tooltip">{hoverTip}</p>}
             {serverAct && (
               <div className="sec-edit">
                 <input autoFocus type="password" value={serverPw}

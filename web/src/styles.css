@@ -559,6 +559,9 @@ details summary { cursor: pointer; }
 .lib-tools button:disabled { opacity: 0.4; cursor: default; }
 .lib-status { font-size: 0.74rem; color: var(--muted); margin: 0 0 8px;
   padding: 4px 6px; background: #f6f7f9; border-radius: 6px; }
+/* 백업/복원 버튼 호버 설명 — 좁은 사이드바라 떠 있는 툴팁 대신 안내 박스 */
+.lib-tip { font-size: 0.74rem; line-height: 1.45; margin: -2px 0 8px;
+  padding: 6px 8px; background: #171c8f; color: #fff; border-radius: 6px; }
 .sec-edit { display: flex; gap: 4px; margin-bottom: 8px; }
 .sec-edit input { flex: 1; min-width: 0; padding: 4px 6px; font-size: 0.8rem;
   border: 1px solid var(--line); border-radius: 6px; }

@@ -139,6 +139,34 @@ describe("섹션(폴더) CRUD + 아트웍 배정", () => {
     expect(a).toBeTruthy();          // 아트웍 자체는 남음
     expect(a.section).toBeUndefined(); // 미분류로
   });
+
+  it("중첩 섹션 — parentId로 하위 섹션을 만든다", async () => {
+    const parent = await createSection("브랜드");
+    const child = await createSection("제품", parent!.id);
+    const list = await listSections();
+    expect(list.find((s) => s.id === child!.id)!.parentId).toBe(parent!.id);
+    // 최상위(부모)는 parentId 없음
+    expect(list.find((s) => s.id === parent!.id)!.parentId).toBeUndefined();
+  });
+
+  it("상위 섹션 삭제 시 하위 섹션은 조부모(없으면 최상위)로 끌어올려진다", async () => {
+    const gp = await createSection("조부모");
+    const parent = await createSection("부모", gp!.id);
+    const child = await createSection("자식", parent!.id);
+    await deleteSection(parent!.id);
+    const list = await listSections();
+    expect(list.some((s) => s.id === parent!.id)).toBe(false); // 부모 삭제됨
+    // 자식은 조부모로 재배정
+    expect(list.find((s) => s.id === child!.id)!.parentId).toBe(gp!.id);
+  });
+
+  it("최상위 섹션 삭제 시 하위 섹션은 최상위로 승격된다", async () => {
+    const top = await createSection("최상위");
+    const sub = await createSection("하위", top!.id);
+    await deleteSection(top!.id);
+    const list = await listSections();
+    expect(list.find((s) => s.id === sub!.id)!.parentId).toBeUndefined();
+  });
 });
 
 describe("hashFile", () => {

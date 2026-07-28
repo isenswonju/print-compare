@@ -135,6 +135,8 @@ a { color: var(--red); }
   text-align: left; padding: 12px; overflow: hidden;
   min-height: 132px; display: flex; flex-direction: column;
 }
+/* 검수 중 잠금 — 클릭/드롭/편집 불가 표시 */
+.drop.multi.locked { cursor: not-allowed; opacity: 0.7; background: #fafafa; }
 .drop-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .drop-head b { display: block; font-size: 0.9rem; }
 .pagebadge {
@@ -151,6 +153,12 @@ a { color: var(--red); }
   font-size: 0.78rem; border-radius: 6px; min-width: 0; max-width: 100%;
 }
 .fileentry:hover { background: #f2f3f5; }
+.fileentry.reorderable { cursor: grab; }
+.fileentry.reorderable:active { cursor: grabbing; }
+/* 드롭 위치 표시(이 항목 앞에 놓임) */
+.fileentry.dropbefore { box-shadow: inset 0 2px 0 var(--red); }
+.fe-grip { flex: none; color: #ccc; font-size: 0.8rem; user-select: none;
+  line-height: 1; }
 .drop .fe-name {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; color: #333; display: inline-block;
@@ -552,12 +560,23 @@ details summary { cursor: pointer; }
   font-size: 0.8rem; font-weight: 700; color: #555;
 }
 .sec-head.plain { color: var(--muted); font-weight: 600; padding-left: 4px; }
+/* 선택(눌린) 섹션 — 여기에 하위 섹션이 추가된다 */
+.sec-head.selected { background: #fff1f0; border-radius: 6px;
+  outline: 1px solid var(--red); }
+.sec-head.selected .sec-name { color: var(--red); }
+/* 선택 안내 바 */
+.sec-selbar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+  padding: 4px 6px; background: #fff6f5; border: 1px solid #ffd9d5;
+  border-radius: 6px; font-size: 0.74rem; color: #555; }
+.sec-selbar span { flex: 1; min-width: 0; }
+.sec-selbar button { border: 0; background: none; color: var(--red);
+  cursor: pointer; font-size: 0.74rem; padding: 0; }
 .sec-toggle, .sec-btn {
   border: 0; background: none; cursor: pointer; color: var(--muted);
   font-size: 0.8rem; padding: 1px 3px; line-height: 1;
 }
 .sec-btn:hover { color: var(--red); }
-.sec-name { cursor: default; }
+.sec-name { cursor: pointer; user-select: none; }
 .sec-name input { font-size: 0.8rem; }
 .sec-count { color: #aaa; font-weight: 400; font-size: 0.72rem; }
 .sec-head input { flex: 1; min-width: 0; padding: 3px 6px; font-size: 0.8rem;

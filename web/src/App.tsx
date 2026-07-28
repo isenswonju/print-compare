@@ -4,8 +4,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { clearSession, createSection, deleteArtwork, deleteSection,
          getArtworkFile, hashFile, listArtworks, listSections, loadSession,
-         renameSection, saveArtwork, saveSession, setArtworkSection,
-         type ArtworkEntry, type Section, type StoredSet } from "./cache.ts";
+         renameSection, requestPersistentStorage, saveArtwork, saveSession,
+         setArtworkSection, type ArtworkEntry, type Section,
+         type StoredSet } from "./cache.ts";
 import { MultiDropZone, FeedbackModal, ResultDetail,
          type ModalState } from "./components.tsx";
 import { applySetName, buildFeedbackPayload, download, feedbackCsv, flushFbQueue,
@@ -19,7 +20,7 @@ import type { FileEntry, ResultItem, SetFb } from "./types.ts";
 
 // 세트 = 한 품목. 원본/인쇄물 각각 여러 파일(각 파일은 PDF면 여러 페이지)을
 // 받아 페이지 목록으로 펼친다. 양쪽 총 페이지 수가 같아야 검수를 시작할 수 있다.
-interface Pair { id: number; ref: FileEntry[]; test: FileEntry[]; }
+interface Pair { id: number; ref: FileEntry[]; test: FileEntry[]; name?: string; }
 
 const pageCount = (side: FileEntry[]) =>
   side.reduce((s, e) => s + e.pages.length, 0);
@@ -53,7 +54,10 @@ export default function App() {
     useState<{ idx: number; m: ModalState } | null>(null);
   const [recent, setRecent] = useState<ArtworkEntry[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // 기본은 닫힘 — 펼친 섹션 id만 담는다(빈 상태 = 전부 닫힘).
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // 선택(눌린) 섹션 — 이 상태에서 ＋섹션을 누르면 하위 섹션이 여기에 생긴다.
+  const [selectedSection, setSelectedSection] = useState<string | null>(null);
   const [addingSection, setAddingSection] = useState(false);
   const [sectionDraft, setSectionDraft] = useState("");
   const [editingSection, setEditingSection] = useState<string | null>(null);
@@ -78,9 +82,12 @@ export default function App() {
     });
 
   // 파일 추가: 각 파일을 페이지 PNG로 펼쳐(PDF면 여러 장) 세트의 해당 면에
-  // 누적한다. 같은 이름은 덮어쓰고, 이름순으로 정렬해 원본↔인쇄물 페이지가
-  // 자연스럽게 매칭되게 한다.
-  const addFiles = async (id: number, which: "ref" | "test", files: File[]) => {
+  // 누적한다. 같은 이름은 제자리에서 덮어쓰고, 새로 온 파일은 이름순으로만
+  // 정렬해 뒤에 붙인다 — 기존(수동 정렬했을 수도 있는) 순서를 보존하면서
+  // 첫 업로드는 원본↔인쇄물이 이름순으로 자연 매칭되게 한다.
+  // setName: 보관함에서 투입할 때만 넘어옴(그 파일이 속한 섹션 이름).
+  const addFiles = async (id: number, which: "ref" | "test", files: File[],
+                          setName?: string) => {
     const key = `${id}:${which}`;
     setConverting((c) => ({ ...c, [key]: true }));
     setError("");
@@ -90,13 +97,14 @@ export default function App() {
         const pages = await ensureRasterPages(file, undefined, pushLog);
         newEntries.push({ name: file.name, file, pages });
       }
+      newEntries.sort((a, b) => a.name.localeCompare(b.name, "ko"));
       setPairs((ps) => ps.map((p) => {
         if (p.id !== id) return p;
         const map = new Map(p[which].map((e) => [e.name, e]));
-        for (const e of newEntries) map.set(e.name, e);
-        const merged = [...map.values()]
-          .sort((a, b) => a.name.localeCompare(b.name, "ko"));
-        return { ...p, [which]: merged };
+        for (const e of newEntries) map.set(e.name, e); // 기존은 제자리 덮어쓰기
+        const merged = [...map.values()];
+        return { ...p, [which]: merged,
+                 name: setName !== undefined ? setName : p.name };
       }));
       // 원본 파일은 보관함에 영구 저장(원본 그대로 — 재사용 시 재래스터화).
       if (which === "ref") {
@@ -113,6 +121,28 @@ export default function App() {
   const removeEntry = (id: number, which: "ref" | "test", name: string) =>
     setPairs((ps) => ps.map((p) =>
       p.id === id ? { ...p, [which]: p[which].filter((e) => e.name !== name) } : p));
+  // 세트 안 파일 순서를 드래그로 바꾼다(원본/인쇄물 페이지 매칭을 수동 조정).
+  const reorderEntry = (id: number, which: "ref" | "test",
+                        from: number, to: number) =>
+    setPairs((ps) => ps.map((p) => {
+      if (p.id !== id) return p;
+      const arr = [...p[which]];
+      const [m] = arr.splice(from, 1);
+      arr.splice(to, 0, m);
+      return { ...p, [which]: arr };
+    }));
+  // 보관함 아트웍을 세트에 드래그 투입 — 그 파일이 속한 섹션 이름으로 세트명
+  // 을 바꾼다(미분류면 기본값 유지). 원본 면에 넣을 때만 세트명을 반영한다.
+  const addArtworkToPair = async (
+    id: number, which: "ref" | "test", hash: string) => {
+    const f = await getArtworkFile(hash);
+    if (!f) return;
+    const art = recent.find((a) => a.hash === hash);
+    const sec = art?.section && sections.find((s) => s.id === art.section);
+    // 원본에 투입 시: 섹션명으로 세트명 지정, 미분류면 ""(→ 기본 "세트 N")로 리셋.
+    const setName = which === "ref" ? (sec ? sec.name : "") : undefined;
+    await addFiles(id, which, [f], setName);
+  };
   const anyConverting = Object.values(converting).some(Boolean);
   const addPair = () =>
     setPairs((ps) => [...ps, { id: ++pairSeq, ref: [], test: [] }]);
@@ -134,6 +164,8 @@ export default function App() {
   // 보관함 로드 + 보류 피드백 자동 재전송 + 지난 결과 복원
   useEffect(() => {
     document.title = branding.name;
+    // 보관함 유실 1차 방어 — 저장소를 'persistent'로 승격 요청(자동 삭제 방지).
+    requestPersistentStorage();
     refreshLibrary();
     flushFbQueue().then((n) => {
       if (n) setFbStatus(`보관 중이던 피드백 ${n}건을 서버로 전송했습니다.`);
@@ -160,32 +192,35 @@ export default function App() {
   }
 
   // 보관함에서 아트웍 클릭: 원본이 빈 첫 세트에 투입, 없으면 새 세트 생성.
-  // 원본이 PDF면 페이지로 펼친다.
+  // 세트명은 그 파일의 섹션 이름으로 맞춘다(미분류면 기본값). PDF는 펼친다.
   const applyArtwork = async (hash: string) => {
-    const f = await getArtworkFile(hash);
-    if (!f) return;
-    const pages = await ensureRasterPages(f, undefined, pushLog);
-    const entry: FileEntry = { name: f.name, file: f, pages };
-    setPairs((ps) => {
-      const empty = ps.find((p) => p.ref.length === 0);
-      if (empty)
-        return ps.map((p) => (p.id === empty.id ? { ...p, ref: [entry] } : p));
-      return [...ps, { id: ++pairSeq, ref: [entry], test: [] }];
-    });
+    let target = pairs.find((p) => p.ref.length === 0)?.id;
+    if (target === undefined) {
+      target = ++pairSeq;
+      setPairs((ps) => [...ps, { id: target!, ref: [], test: [] }]);
+    }
+    await addArtworkToPair(target, "ref", hash);
   };
 
-  // 보관함 섹션(폴더) 관리
+  // 보관함 섹션(폴더) 관리 — 선택된 상위 섹션이 있으면 그 아래에 만든다.
   const onAddSection = async () => {
     const name = sectionDraft.trim();
+    const parent = selectedSection ?? undefined;
     setAddingSection(false); setSectionDraft("");
-    if (name) { await createSection(name); refreshLibrary(); }
+    if (name) {
+      await createSection(name, parent);
+      if (parent) setExpanded((x) => ({ ...x, [parent]: true })); // 부모 펼쳐 보이기
+      refreshLibrary();
+    }
   };
   const onRenameSection = async (id: string, name: string) => {
     setEditingSection(null);
     if (name.trim()) { await renameSection(id, name.trim()); refreshLibrary(); }
   };
   const onDeleteSection = async (id: string) => {
-    await deleteSection(id); refreshLibrary();
+    await deleteSection(id);
+    setSelectedSection((cur) => (cur === id ? null : cur));
+    refreshLibrary();
   };
   const onDeleteArtwork = async (hash: string) => {
     await deleteArtwork(hash); refreshLibrary();
@@ -212,20 +247,85 @@ export default function App() {
               title="보관함에서 삭제" onClick={() => onDeleteArtwork(a.hash)}>✕</button>
     </div>
   );
-  // 드롭 대상(섹션/미분류) 공통 핸들러
+  // 드롭 대상(섹션/미분류) 공통 핸들러. 중첩 섹션에서 부모로 버블링되지 않게
+  // stopPropagation — 가장 안쪽(놓은) 섹션에만 배정된다.
   const dropProps = (sectionId: string) => ({
     onDragOver: (e: React.DragEvent) => {
-      e.preventDefault(); e.dataTransfer.dropEffect = "move";
+      e.preventDefault(); e.stopPropagation();
+      e.dataTransfer.dropEffect = "move";
       setDragOverSec(sectionId);
     },
     onDragLeave: () => setDragOverSec((s) => (s === sectionId ? null : s)),
     onDrop: (e: React.DragEvent) => {
-      e.preventDefault();
+      e.preventDefault(); e.stopPropagation();
       const hash = e.dataTransfer.getData("text/hash");
       setDragOverSec(null);
       if (hash) onSetSection(hash, sectionId);
     },
   });
+
+  // 섹션(폴더) 재귀 렌더 — 기본 닫힘, 선택된 상위 섹션은 강조.
+  // depth로 들여쓰기. 자식 섹션은 부모가 펼쳐졌을 때만 보인다.
+  const renderSection = (s: Section, depth: number): React.ReactNode => {
+    const arts = recent.filter((a) => a.section === s.id);
+    const children = sections.filter((c) => c.parentId === s.id);
+    const isOpen = !!expanded[s.id];
+    const isSel = selectedSection === s.id;
+    return (
+      <div className={"sec-group" + (dragOverSec === s.id ? " dragover" : "")}
+           key={s.id} {...dropProps(s.id)}>
+        <div className={"sec-head" + (isSel ? " selected" : "")}
+             style={{ paddingLeft: depth * 14 }}>
+          <button type="button" className="sec-toggle"
+                  onClick={() => setExpanded((x) => ({ ...x, [s.id]: !x[s.id] }))}
+                  title={isOpen ? "접기" : "펼치기"}>
+            {isOpen ? "▾" : "▸"}
+          </button>
+          {editingSection === s.id ? (
+            <input autoFocus defaultValue={s.name}
+              onBlur={(e) => onRenameSection(s.id, e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onRenameSection(s.id, e.currentTarget.value);
+                if (e.key === "Escape") setEditingSection(null);
+              }} />
+          ) : (
+            <span className="sec-name"
+                  title="클릭: 선택(여기에 하위 섹션 추가) · 더블클릭: 이름 변경"
+                  onClick={() => !running &&
+                    setSelectedSection((cur) => (cur === s.id ? null : s.id))}
+                  onDoubleClick={() => !running && setEditingSection(s.id)}>
+              {s.name} <span className="sec-count">{arts.length}</span>
+              {children.length > 0 &&
+                <span className="sec-count">· {children.length}폴더</span>}
+            </span>
+          )}
+          <span style={{ flex: 1 }} />
+          <button type="button" className="sec-btn" title="하위 섹션 추가"
+                  disabled={running}
+                  onClick={() => {
+                    setSelectedSection(s.id);
+                    setExpanded((x) => ({ ...x, [s.id]: true }));
+                    setAddingSection(true);
+                  }}>＋</button>
+          <button type="button" className="sec-btn" title="이름 변경"
+                  disabled={running}
+                  onClick={() => setEditingSection(s.id)}>✎</button>
+          <button type="button" className="sec-btn" title="섹션 삭제(원본은 미분류로)"
+                  disabled={running}
+                  onClick={() => onDeleteSection(s.id)}>🗑</button>
+        </div>
+        {isOpen && (
+          <>
+            {arts.map(renderArtwork)}
+            {arts.length === 0 && children.length === 0 && (
+              <div className="sec-empty">여기로 드래그해 정리하세요</div>
+            )}
+            {children.map((c) => renderSection(c, depth + 1))}
+          </>
+        )}
+      </div>
+    );
+  };
 
   // 세트가 완성되려면 원본·인쇄물 모두 1장 이상이고 총 페이지 수가 같아야 한다.
   const pairComplete = (p: Pair) =>
@@ -256,7 +356,8 @@ export default function App() {
     try {
       const sets: RunSet[] = completePairs.map((p, i) => ({
         setId: p.id,
-        name: `세트 ${i + 1}`, // 기본 이름(사용자가 결과에서 수정 가능)
+        // 세트 이름: 보관함 섹션명이 반영됐으면 그 이름, 아니면 기본값.
+        name: p.name?.trim() || `세트 ${i + 1}`,
         refPages: flatPages(p.ref),
         testPages: flatPages(p.test),
       }));
@@ -775,11 +876,22 @@ export default function App() {
             <div className="artlib-title">
               <span>원본 보관함</span>
               <button type="button" className="sec-add" disabled={running}
+                      title={selectedSection
+                        ? "선택한 섹션 아래에 하위 섹션을 만듭니다"
+                        : "최상위 섹션을 만듭니다"}
                       onClick={() => setAddingSection(true)}>＋ 섹션</button>
             </div>
+            {selectedSection && (
+              <div className="sec-selbar">
+                <span>선택됨: <b>{sections.find((s) => s.id === selectedSection)?.name}</b>
+                  {" "}— ＋섹션은 이 아래에 생깁니다</span>
+                <button type="button" onClick={() => setSelectedSection(null)}>해제</button>
+              </div>
+            )}
             {addingSection && (
               <div className="sec-edit">
-                <input autoFocus value={sectionDraft} placeholder="섹션 이름"
+                <input autoFocus value={sectionDraft}
+                  placeholder={selectedSection ? "하위 섹션 이름" : "섹션 이름"}
                   onChange={(e) => setSectionDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") onAddSection();
@@ -810,45 +922,10 @@ export default function App() {
                 </div>
               );
             })()}
-            {/* 섹션별 */}
-            {sections.map((s) => {
-              const arts = recent.filter((a) => a.section === s.id);
-              const isCol = !!collapsed[s.id];
-              return (
-                <div className={"sec-group" + (dragOverSec === s.id ? " dragover" : "")}
-                     key={s.id} {...dropProps(s.id)}>
-                  <div className="sec-head">
-                    <button type="button" className="sec-toggle"
-                            onClick={() => setCollapsed((c) => ({ ...c, [s.id]: !c[s.id] }))}>
-                      {isCol ? "▸" : "▾"}
-                    </button>
-                    {editingSection === s.id ? (
-                      <input autoFocus defaultValue={s.name}
-                        onBlur={(e) => onRenameSection(s.id, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") onRenameSection(s.id, e.currentTarget.value);
-                          if (e.key === "Escape") setEditingSection(null);
-                        }} />
-                    ) : (
-                      <span className="sec-name" onDoubleClick={() => setEditingSection(s.id)}>
-                        {s.name} <span className="sec-count">{arts.length}</span>
-                      </span>
-                    )}
-                    <span style={{ flex: 1 }} />
-                    <button type="button" className="sec-btn" title="이름 변경"
-                            disabled={running}
-                            onClick={() => setEditingSection(s.id)}>✎</button>
-                    <button type="button" className="sec-btn" title="섹션 삭제(원본은 미분류로)"
-                            disabled={running}
-                            onClick={() => onDeleteSection(s.id)}>🗑</button>
-                  </div>
-                  {!isCol && arts.map(renderArtwork)}
-                  {!isCol && arts.length === 0 && (
-                    <div className="sec-empty">여기로 드래그해 정리하세요</div>
-                  )}
-                </div>
-              );
-            })}
+            {/* 섹션별 — 최상위만 재귀 렌더(하위는 renderSection 안에서) */}
+            {sections.filter((s) => !s.parentId ||
+              !sections.some((p) => p.id === s.parentId))
+              .map((s) => renderSection(s, 0))}
           </aside>
           <div className="inspect-main">
             <div className="sets">
@@ -859,7 +936,7 @@ export default function App() {
                 return (
                   <div className="pair card" key={p.id}>
                     <div className="pairhead">
-                      <b>세트 {i + 1}</b>
+                      <b>{p.name || `세트 ${i + 1}`}</b>
                       {pairs.length > 1 && (
                         <button type="button" className="rm" disabled={running}
                                 onClick={() => removePair(p.id)}>삭제</button>
@@ -867,13 +944,17 @@ export default function App() {
                     </div>
                     <div className="pairzones">
                       <MultiDropZone label="① 원본" entries={p.ref}
-                        busy={!!converting[`${p.id}:ref`]}
+                        busy={!!converting[`${p.id}:ref`]} disabled={running}
                         onAdd={(fs) => addFiles(p.id, "ref", fs)}
-                        onRemove={(n) => removeEntry(p.id, "ref", n)} />
+                        onRemove={(n) => removeEntry(p.id, "ref", n)}
+                        onReorder={(f, t) => reorderEntry(p.id, "ref", f, t)}
+                        onAddArtwork={(h) => addArtworkToPair(p.id, "ref", h)} />
                       <MultiDropZone label="② 인쇄물" entries={p.test}
-                        busy={!!converting[`${p.id}:test`]}
+                        busy={!!converting[`${p.id}:test`]} disabled={running}
                         onAdd={(fs) => addFiles(p.id, "test", fs)}
-                        onRemove={(n) => removeEntry(p.id, "test", n)} />
+                        onRemove={(n) => removeEntry(p.id, "test", n)}
+                        onReorder={(f, t) => reorderEntry(p.id, "test", f, t)}
+                        onAddArtwork={(h) => addArtworkToPair(p.id, "test", h)} />
                     </div>
                     {(rc > 0 || tc > 0) && (
                       <div className={"pairmatch" + (bad ? " bad" : okMatch ? " ok" : "")}>

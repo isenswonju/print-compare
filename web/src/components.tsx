@@ -9,34 +9,51 @@ import type { DispFinding, FileEntry, MissedFb, ResultItem,
 // ---------------------------------------------------------------- 다중 드롭존
 // 여러 파일(이미지/PDF)을 받는다. PDF는 페이지 수만큼 펼쳐지며, 총 페이지 수를
 // 배지로 보여준다(원본 2장 PDF ↔ 인쇄물 2장 매칭 등).
-export function MultiDropZone({ label, entries, busy, onAdd, onRemove }: {
+export function MultiDropZone({ label, entries, busy, disabled,
+                               onAdd, onRemove, onReorder, onAddArtwork }: {
   label: string;
   entries: FileEntry[];
   busy?: boolean;
+  disabled?: boolean;         // 검수 중에는 편집을 완전히 잠근다
   onAdd: (files: File[]) => void;
   onRemove: (name: string) => void;
+  onReorder?: (from: number, to: number) => void;  // 목록 내 드래그 재정렬
+  onAddArtwork?: (hash: string) => void;            // 보관함에서 드래그 투입
 }) {
   const [over, setOver] = useState(false);
+  const [dragIdx, setDragIdx] = useState<number | null>(null); // 재정렬 중 파일 인덱스
+  const [overIdx, setOverIdx] = useState<number | null>(null); // 드롭 위치 표시
   const inp = useRef<HTMLInputElement>(null);
   const total = entries.reduce((s, e) => s + e.pages.length, 0);
   const has = entries.length > 0;
 
+  const openPicker = () => { if (!disabled) inp.current?.click(); };
+
   return (
     <div
-      className={"drop multi" + (over ? " over" : "") + (has ? " ok" : "")}
-      role="button" tabIndex={0}
-      onClick={() => inp.current?.click()}
+      className={"drop multi" + (over ? " over" : "") + (has ? " ok" : "") +
+                 (disabled ? " locked" : "")}
+      role="button" tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
+      onClick={openPicker}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          inp.current?.click();
+          openPicker();
         }
       }}
-      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragOver={(e) => {
+        if (disabled) return;
+        e.preventDefault(); setOver(true);
+      }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => {
+        if (disabled) return;
         e.preventDefault();
         setOver(false);
+        // 보관함 아트웍(text/hash) 우선 처리 — 파일 드롭이 아니면 투입.
+        const hash = e.dataTransfer.getData("text/hash");
+        if (hash && onAddArtwork) { onAddArtwork(hash); return; }
         if (e.dataTransfer.files.length) onAdd([...e.dataTransfer.files]);
       }}
     >
@@ -46,21 +63,50 @@ export function MultiDropZone({ label, entries, busy, onAdd, onRemove }: {
       </div>
       {has && (
         <ul className="filelist" onClick={(e) => e.stopPropagation()}>
-          {entries.map((en) => (
-            <li key={en.name} className="fileentry">
+          {entries.map((en, i) => (
+            <li key={en.name}
+                className={"fileentry" + (!disabled && onReorder ? " reorderable" : "") +
+                           (overIdx === i && dragIdx !== null ? " dropbefore" : "")}
+                draggable={!disabled && !!onReorder}
+                onDragStart={(e) => {
+                  if (disabled || !onReorder) return;
+                  setDragIdx(i);
+                  e.dataTransfer.effectAllowed = "move";
+                  // 재정렬 전용 마커 — 보관함 드롭(text/hash)과 구분.
+                  e.dataTransfer.setData("text/reorder", String(i));
+                }}
+                onDragOver={(e) => {
+                  if (disabled || dragIdx === null) return;
+                  e.preventDefault(); e.stopPropagation();
+                  e.dataTransfer.dropEffect = "move";
+                  setOverIdx(i);
+                }}
+                onDrop={(e) => {
+                  if (disabled || dragIdx === null || !onReorder) return;
+                  e.preventDefault(); e.stopPropagation();
+                  if (dragIdx !== i) onReorder(dragIdx, i);
+                  setDragIdx(null); setOverIdx(null); setOver(false);
+                }}
+                onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}>
+              {!disabled && onReorder &&
+                <span className="fe-grip" title="드래그해서 순서 변경">⠿</span>}
               <span className="fe-name" title={en.name}>{en.name}</span>
-              <button type="button" className="fe-rm" aria-label="제거"
-                      onClick={() => onRemove(en.name)}>✕</button>
+              {!disabled && (
+                <button type="button" className="fe-rm" aria-label="제거"
+                        onClick={() => onRemove(en.name)}>✕</button>
+              )}
             </li>
           ))}
         </ul>
       )}
       {busy ? (
         <div className="drop-hint"><span className="spin" /> PDF 변환 중…</div>
+      ) : disabled ? (
+        <div className="drop-hint">검수 중에는 편집할 수 없습니다</div>
       ) : (
         <div className="drop-hint">
           {has ? "＋ 파일 추가" : "클릭 또는 드래그"}
-          <span className="hint">PNG / JPG / PDF · 여러 장 가능</span>
+          <span className="hint">PNG / JPG / PDF · 보관함에서 끌어놓기 가능</span>
         </div>
       )}
       <input
@@ -69,6 +115,7 @@ export function MultiDropZone({ label, entries, busy, onAdd, onRemove }: {
         accept=".png,.jpg,.jpeg,.pdf,application/pdf"
         multiple
         hidden
+        disabled={disabled}
         onChange={(e) => {
           if (e.target.files?.length) onAdd([...e.target.files]);
           e.target.value = ""; // 같은 파일 다시 추가 가능하게

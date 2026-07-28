@@ -29,6 +29,7 @@ export interface Section {
   id: string;
   name: string;
   createdAt: number;
+  parentId?: string; // 상위 섹션 id(없으면 최상위). 중첩 폴더 지원.
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -172,11 +173,12 @@ export async function listSections(): Promise<Section[]> {
   } catch { return []; }
 }
 
-export async function createSection(name: string): Promise<Section | null> {
+export async function createSection(
+  name: string, parentId?: string): Promise<Section | null> {
   try {
     const sec: Section = {
       id: `sec-${Date.now().toString(36)}-${++sectionSeq}`,
-      name, createdAt: Date.now(),
+      name, createdAt: Date.now(), parentId,
     };
     await tx("sections", "readwrite", (s) => s.put(sec, sec.id));
     return sec;
@@ -191,10 +193,16 @@ export async function renameSection(id: string, name: string): Promise<void> {
   } catch { /* 무시 */ }
 }
 
-// 섹션을 지우면 그 안의 아트웍은 삭제하지 않고 미분류로 되돌린다.
+// 섹션을 지우면 그 안의 아트웍은 삭제하지 않고 미분류로 되돌리고,
+// 하위 섹션은 지워지는 섹션의 부모(없으면 최상위)로 끌어올린다.
 export async function deleteSection(id: string): Promise<void> {
   try {
+    const target = await tx<Section>("sections", "readonly", (s) => s.get(id));
+    const parentId = target?.parentId;
     await tx("sections", "readwrite", (s) => s.delete(id));
+    const secs = await listSections();
+    await Promise.all(secs.filter((s) => s.parentId === id).map((s) =>
+      tx("sections", "readwrite", (st) => st.put({ ...s, parentId }, s.id))));
     const arts = await listArtworks();
     await Promise.all(arts.filter((a) => a.section === id)
       .map((a) => setArtworkSection(a.hash, undefined)));
@@ -250,6 +258,29 @@ export async function clearSession(): Promise<void> {
   try {
     await tx("session", "readwrite", (s) => s.delete("last"));
   } catch { /* 무시 */ }
+}
+
+// -------------------------------------------------------- 영구 저장(유실 방지)
+// 원본 보관함은 IndexedDB에 있는데, 브라우저는 저장공간 압박 시 "best-effort"
+// 데이터를 임의 삭제할 수 있다. persist()로 저장소를 'persistent'로 승격하면
+// 사용자가 명시적으로 지우기 전까지 자동 삭제되지 않는다(유실 1차 방어).
+export async function requestPersistentStorage(): Promise<boolean> {
+  try {
+    if (!navigator.storage?.persist) return false;
+    if (await navigator.storage.persisted?.()) return true;
+    return await navigator.storage.persist();
+  } catch { return false; }
+}
+
+// 보관함 용량 추정(사용/여유) — 관리 화면에서 유실 위험을 가늠하는 용도.
+export async function storageEstimate(): Promise<
+  { usage: number; quota: number; persisted: boolean } | null> {
+  try {
+    if (!navigator.storage?.estimate) return null;
+    const { usage = 0, quota = 0 } = await navigator.storage.estimate();
+    const persisted = (await navigator.storage.persisted?.()) ?? false;
+    return { usage, quota, persisted };
+  } catch { return null; }
 }
 
 export async function getArtworkFile(hash: string): Promise<File | null> {

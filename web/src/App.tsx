@@ -977,7 +977,9 @@ export default function App() {
                   ☁ 불러오기</button>
               </div>
             )}
-            {hoverTip && <p className="lib-tip" role="tooltip">{hoverTip}</p>}
+            <div className="lib-tip-anchor">
+              {hoverTip && <p className="lib-tip" role="tooltip">{hoverTip}</p>}
+            </div>
             {serverAct && (
               <div className="sec-edit">
                 <input autoFocus type="password" value={serverPw}

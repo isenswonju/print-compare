@@ -13,6 +13,8 @@ import { applySetName, buildFeedbackPayload, download, feedbackCsv, flushFbQueue
          fmtDateTime, fmtMB, hasFeedbackEndpoint, loadFbQueue, restoreResults,
          saveFbQueue, serializeResults, slimPayload,
          trySendFeedback } from "./lib.ts";
+import { hasLibraryServer, pullLibraryFromServer,
+         pushLibraryToServer } from "./server-library.ts";
 import { runAll, type RunSet } from "./runner.ts";
 import { ensureRasterPages } from "./pipeline/pdf.ts";
 import { branding } from "./branding.ts";
@@ -63,6 +65,10 @@ export default function App() {
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [libStatus, setLibStatus] = useState(""); // 백업/복원 안내
   const libImportRef = useRef<HTMLInputElement>(null);
+  // 서버 보관함 동기화 — 비번 입력 프롬프트 상태
+  const [serverAct, setServerAct] = useState<"push" | "pull" | null>(null);
+  const [serverPw, setServerPw] = useState("");
+  const [serverBusy, setServerBusy] = useState(false);
   const [dragOverSec, setDragOverSec] = useState<string | null>(null);
   const [editingSet, setEditingSet] = useState<number | null>(null); // 이름 편집 중인 setId
   const [restored, setRestored] = useState(false);
@@ -254,6 +260,31 @@ export default function App() {
       setLibStatus(`복원 완료 — 아트웍 ${r.artworks}개 · 섹션 ${r.sections}개 반영`);
     } catch (e) {
       setLibStatus("복원 실패: " + String((e as Error).message || e));
+    }
+  };
+
+  // 서버 보관함 동기화(안 A) — 비번 확인 후 업로드/불러오기.
+  const runServerSync = async () => {
+    const act = serverAct, pw = serverPw;
+    setServerAct(null); setServerPw("");
+    if (!act || !pw) return;
+    setServerBusy(true);
+    setLibStatus(act === "push" ? "서버로 백업 중…" : "서버에서 불러오는 중…");
+    try {
+      if (act === "push") {
+        const r = await pushLibraryToServer(pw);
+        setLibStatus(`서버 백업 완료 — 아트웍 ${r.artworks}개 · 섹션 ${r.sections}개`);
+      } else {
+        const r = await pullLibraryFromServer(pw);
+        if (!r) { setLibStatus("서버에 저장된 백업이 아직 없습니다."); return; }
+        await refreshLibrary();
+        setLibStatus(`서버에서 불러옴 — 아트웍 ${r.artworks}개 · 섹션 ${r.sections}개 반영`);
+      }
+    } catch (e) {
+      setLibStatus((act === "push" ? "서버 백업 실패: " : "불러오기 실패: ") +
+        String((e as Error).message || e));
+    } finally {
+      setServerBusy(false);
     }
   };
 
@@ -923,6 +954,30 @@ export default function App() {
                        e.target.value = "";
                      }} />
             </div>
+            {hasLibraryServer && (
+              <div className="lib-tools">
+                <button type="button" disabled={running || serverBusy}
+                        title="로컬 보관함을 공용 서버에 백업(팀 공유)"
+                        onClick={() => { setServerAct("push"); setServerPw(""); }}>
+                  ☁ 서버백업</button>
+                <button type="button" disabled={running || serverBusy}
+                        title="공용 서버의 최신 백업을 불러와 병합"
+                        onClick={() => { setServerAct("pull"); setServerPw(""); }}>
+                  ☁ 불러오기</button>
+              </div>
+            )}
+            {serverAct && (
+              <div className="sec-edit">
+                <input autoFocus type="password" value={serverPw}
+                  placeholder={serverAct === "push" ? "백업 비밀번호" : "불러오기 비밀번호"}
+                  onChange={(e) => setServerPw(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") runServerSync();
+                    if (e.key === "Escape") { setServerAct(null); setServerPw(""); }
+                  }} />
+                <button type="button" onClick={runServerSync}>확인</button>
+              </div>
+            )}
             {libStatus && <p className="lib-status">{libStatus}</p>}
             {selectedSection && (
               <div className="sec-selbar">

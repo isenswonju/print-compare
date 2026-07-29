@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applySetName, boxesIntersect, buildFeedbackPayload, computeDefects,
-  computeFeedbackEndpoints, csvEsc, displayCsv, download, drawLensInto,
-  feedbackCsv, feedbackTargets, flushFbQueue, fmtDateTime, fmtMB, loadFbQueue,
-  mapDisplay, restoreResults, saveFbQueue, serializeResults, sevCounts,
-  slimPayload, trySendFeedback, type FeedbackPayload,
+  computeFeedbackEndpoints, copyToClipboard, csvEsc, displayCsv, download,
+  drawLensInto, entryDay, feedbackCsv, feedbackTargets, flushFbQueue,
+  fmtDateTime, fmtMB, loadFbQueue, mapDisplay, restoreResults, saveFbQueue,
+  serializeResults, sevCounts, slimPayload, summarizeFeedbackForChat, buildErrorReport,
+  trySendFeedback, type AdminEntry, type FeedbackPayload,
 } from "./lib.ts";
 import type { DispFinding, Finding, ResultItem } from "./types.ts";
 
@@ -339,5 +340,157 @@ describe("buildFeedbackPayload — 건너뛰기(캔버스 불필요)", () => {
     expect(payload.items).toEqual([]);
     expect(payload.app).toBe("artwork-compare-web");
     expect(typeof payload.sentAt).toBe("string");
+  });
+});
+
+describe("수집 피드백 요약/복사 (관리자 화면 보조)", () => {
+  const entry = (over: Partial<AdminEntry> = {}): AdminEntry => ({
+    id: "abc123", received: "2026-07-29T08:27:52.000Z",
+    origin: "https://example.test",
+    data: { version: 3, items: [{
+      set: "aa",
+      feedback: {
+        defects: [{ fp: true, ktype: "인쇄 오류", cause: "스캔 노이즈/먼지",
+                    comment: "테스트용\n  피드백2", bbox: [10, 20, 30, 40] }],
+        missed: [{ x: 1234.4, y: 567.6, cause: "잉여 잉크/오염",
+                   comment: "테스트용 피드백." }],
+      },
+    }] },
+    ...over,
+  });
+
+  it("entryDay: received → uploadedAt 순으로 날짜를 뽑는다", () => {
+    expect(entryDay(entry())).toBe("2026-07-29");
+    expect(entryDay({ id: "x", uploadedAt: "2026-01-02T00:00:00.000Z" }))
+      .toBe("2026-01-02");
+    expect(entryDay({ id: "x" })).toBe("날짜 미상");
+    expect(entryDay({ id: "x", received: "이상한값" })).toBe("날짜 미상");
+  });
+
+  it("요약에 id·세트·판정·원인·좌표·의견이 담긴다", () => {
+    const text = summarizeFeedbackForChat([entry()]);
+    expect(text).toContain("[abc123]");
+    expect(text).toContain('세트 "aa"');
+    expect(text).toContain("오탐 | 인쇄 오류 | 원인: 스캔 노이즈/먼지");
+    expect(text).toContain("bbox_ref=[10,20,30,40]");
+    expect(text).toContain('"테스트용 피드백2"');   // 줄바꿈·중복 공백은 정리
+    expect(text).toContain("미검출 | 원인: 잉여 잉크/오염 | 위치=(1234,568)");
+  });
+
+  it("정탐·본문 없음·읽기 실패 항목도 형태를 유지한다", () => {
+    expect(summarizeFeedbackForChat([])).toBe("");
+    const tp = summarizeFeedbackForChat([entry({
+      data: { items: [{ feedback: { defects: [{ fp: false }] } }] } })]);
+    expect(tp).toContain("- 정탐 | 결함");
+    expect(tp).toContain('세트 "이름 없음"');
+    const empty = summarizeFeedbackForChat([entry({ data: { items: [{ set: "s" }] } })]);
+    expect(empty).toContain("(내용 없음)");
+    const broken = summarizeFeedbackForChat([{ id: "e1", error: "read failed" }]);
+    expect(broken).toContain("본문을 읽지 못함: read failed");
+    // data 자체가 없어도 헤더만 남고 깨지지 않는다
+    expect(summarizeFeedbackForChat([{ id: "e2" }])).toContain("[e2]");
+  });
+
+  it("요약에 type 폴백·시간 미상 표기가 적용된다", () => {
+    const text = summarizeFeedbackForChat([{
+      id: "e3",
+      data: { items: [{ set: "s", feedback: { defects: [{ type: "extra" }] } }] },
+    }]);
+    expect(text).toContain("시간 미상");
+    expect(text).toContain("정탐 | extra");
+  });
+
+  it("미검출 항목의 원인·좌표·의견이 없어도 한 줄로 나온다", () => {
+    const text = summarizeFeedbackForChat([{
+      id: "e4",
+      data: { items: [{ set: "s", feedback: { missed: [{}] } }] },
+    }]);
+    expect(text).toContain("- 미검출");
+    expect(text).not.toContain("위치=");
+  });
+
+  it("copyToClipboard: clipboard API를 쓰고, 없거나 실패하면 폴백", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    expect(await copyToClipboard("hi")).toBe(true);
+    expect(writeText).toHaveBeenCalledWith("hi");
+
+    // clipboard가 거부 → execCommand 폴백
+    vi.stubGlobal("navigator", {
+      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) } });
+    const exec = vi.fn().mockReturnValue(true);
+    (document as unknown as { execCommand: unknown }).execCommand = exec;
+    expect(await copyToClipboard("hi")).toBe(true);
+    expect(exec).toHaveBeenCalledWith("copy");
+
+    // clipboard 자체가 없어도 폴백이 동작
+    vi.stubGlobal("navigator", {});
+    expect(await copyToClipboard("hi")).toBe(true);
+
+    // 폴백까지 깨지면 false
+    (document as unknown as { execCommand: unknown }).execCommand = () => {
+      throw new Error("nope");
+    };
+    expect(await copyToClipboard("hi")).toBe(false);
+  });
+});
+
+describe("분석 실패 오류 보고", () => {
+  const failed: ResultItem = {
+    name: "세트1", setId: 1, page: 2, pageCount: 3,
+    error: "OpenCV 내부 오류(코드 120) — 단계: 전역 정합 (ORB)",
+    refFile: new File(["r"], "ref.pdf", { type: "application/pdf" }),
+    testFile: new File(["t"], "scan.png", { type: "image/png" }),
+  };
+
+  it("오류 문구·파일 메타·로그를 담고 이미지는 담지 않는다", () => {
+    const logs = Array.from({ length: 80 }, (_, i) => `line${i}`);
+    const p = buildErrorReport([failed], logs, "PDF 두 장 올리다 실패");
+    expect(p.kind).toBe("error");
+    const item = p.items[0] as Record<string, any>;
+    expect(item.error).toContain("코드 120");
+    expect(item.page).toBe(2);
+    expect(item.note).toBe("PDF 두 장 올리다 실패");
+    expect(item.refFile).toEqual({ name: "ref.pdf", size: 1, type: "application/pdf" });
+    expect(item.testFile.name).toBe("scan.png");
+    expect(item.logs).toHaveLength(60);        // 마지막 60줄만
+    expect(item.logs[0]).toBe("line20");
+    expect(typeof item.ua).toBe("string");
+    // 라벨 이미지는 어떤 형태로도 실리지 않는다
+    expect(JSON.stringify(p)).not.toContain("data:image");
+  });
+
+  it("메모·파일이 없어도 형태를 유지한다", () => {
+    const p = buildErrorReport([{ name: "s", setId: 1, page: 1, pageCount: 1,
+                                  error: "실패" }], []);
+    const item = p.items[0] as Record<string, any>;
+    expect(item.note).toBeUndefined();
+    expect(item.refFile).toBeUndefined();
+    expect(item.testFile).toBeUndefined();
+    expect(item.logs).toEqual([]);
+  });
+
+  it("요약 복사에도 실패 보고가 사람이 읽을 형태로 들어간다", () => {
+    const text = summarizeFeedbackForChat([{
+      id: "err1", received: "2026-07-29T08:00:00.000Z",
+      data: { kind: "error", items: [{
+        set: "세트1", page: 2, error: "코드 120 — 단계: 전역 정합",
+        note: "  두 번  시도함 ", refFile: { name: "ref.pdf", size: 1048576 },
+        testFile: { name: "scan.png", size: 2097152 },
+        logs: ["a", "b"] }] },
+    }]);
+    expect(text).toContain("분석 실패 보고");
+    expect(text).toContain("· 페이지 2");
+    expect(text).toContain("- 오류: 코드 120 — 단계: 전역 정합");
+    expect(text).toContain('사용자 메모: "두 번 시도함"');
+    expect(text).toContain("원본: ref.pdf (1.0MB)");
+    expect(text).toContain("인쇄물: scan.png (2.0MB)");
+    expect(text).toContain("마지막 로그:");
+  });
+
+  it("오류 항목에 문구·메모·파일·로그가 없어도 한 줄은 남는다", () => {
+    const text = summarizeFeedbackForChat([{
+      id: "err2", data: { kind: "error", items: [{ set: "s" }] } }]);
+    expect(text).toContain("- 오류: 문구 없음");
   });
 });

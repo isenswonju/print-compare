@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "bench:library": "node tools/library-bench.mjs"
   },
   "dependencies": {
     "@techstark/opencv-js": "^4.10.0-release.1",

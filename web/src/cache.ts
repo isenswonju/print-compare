@@ -102,15 +102,17 @@ export const putRefWords = (hash: string, words: Word[]) =>
     .catch(() => {});
 
 // 아트웍은 영구 보관(자동 삭제 없음) — 사용자가 명시적으로 삭제할 때만 지워진다.
-// 재저장 시 기존 섹션 배정은 유지한다.
-export async function saveArtwork(hash: string, file: File): Promise<void> {
+// 재저장 시 기존 폴더 배정은 유지한다(section 인자는 신규 저장일 때만 쓰인다 —
+// 보관함으로 직접 드롭한 파일을 그 폴더에 바로 넣기 위한 것).
+export async function saveArtwork(
+  hash: string, file: File, section?: string): Promise<void> {
   try {
     const existing = await tx<Omit<ArtworkEntry, "hash">>(
       "artworks", "readonly", (s) => s.get(hash));
     await tx("artworks", "readwrite", (s) =>
       s.put({ name: file.name, size: file.size, type: file.type,
               blob: file, lastUsed: Date.now(),
-              section: existing?.section }, hash));
+              section: existing ? existing.section : section }, hash));
   } catch { /* 캐시 실패는 기능에 영향 없음 */ }
 }
 
@@ -191,6 +193,30 @@ export async function renameSection(id: string, name: string): Promise<void> {
     if (!rec) return;
     await tx("sections", "readwrite", (s) => s.put({ ...rec, name }, id));
   } catch { /* 무시 */ }
+}
+
+// 폴더를 다른 폴더 아래로 옮긴다(parentId 없으면 최상위로). 자기 자신이나
+// 자기 하위로는 옮길 수 없다 — 트리가 끊어져 폴더가 통째로 사라져 보인다.
+export async function moveSection(
+  id: string, parentId?: string): Promise<boolean> {
+  try {
+    const secs = await listSections();
+    const target = secs.find((s) => s.id === id);
+    if (!target) return false;
+    if (parentId) {
+      if (parentId === id) return false;
+      if (!secs.some((s) => s.id === parentId)) return false;
+      // parentId가 id의 후손이면 순환 — 조상을 거슬러 올라가며 확인한다.
+      const byId = new Map(secs.map((s) => [s.id, s]));
+      for (let cur = byId.get(parentId); cur; cur = cur.parentId
+             ? byId.get(cur.parentId) : undefined)
+        if (cur.parentId === id) return false;
+    }
+    if (target.parentId === parentId) return false; // 제자리
+    await tx("sections", "readwrite", (s) =>
+      s.put({ ...target, parentId }, id));
+    return true;
+  } catch { return false; }
 }
 
 // 섹션을 지우면 그 안의 아트웍은 삭제하지 않고 미분류로 되돌리고,
@@ -294,12 +320,88 @@ export async function getArtworkFile(hash: string): Promise<File | null> {
   } catch { return null; }
 }
 
-// ---------------------------------------------------- 보관함 백업/복원(안 C)
-// 서버 없이도 유실에 대비하는 최소 안전망 — 보관함 전체(아트웍 원본 + 섹션
-// 구조)를 파일 하나로 내보내고 되살린다. 이미지가 이미 압축(PNG/PDF)이라
-// zip 압축 이득이 적어 의존성 없이 JSON+base64 단일 파일로 저장한다.
-export const LIBRARY_BACKUP_VERSION = 1;
+// -------------------------------------------------- 보관함 동기화(매니페스트)
+// 서버 보관함은 "매니페스트(메타데이터 JSON) + 파일 단위 blob"으로 주고받는다.
+// 전체를 base64 JSON 한 덩어리로 만들던 v1 방식은 보관함이 커지면(수백 MB)
+// 문자열 하나가 메모리를 통째로 먹어 탭이 죽는다. 파일을 따로 올리면
+//  · 이미 서버에 있는 해시는 건너뛰어(내용 주소 지정) 증분 동기화가 되고
+//  · 중간에 끊겨도 다음 시도가 이어서 진행되며
+//  · 메모리 사용이 "가장 큰 파일 1개" 수준으로 고정된다.
+export const LIBRARY_MANIFEST_VERSION = 2;
 
+export interface ArtworkMeta {
+  hash: string;
+  name: string;
+  size: number;
+  type: string;
+  section?: string;
+}
+
+export interface LibraryManifest {
+  version: number;
+  exportedAt: number;
+  sections: Section[];
+  artworks: ArtworkMeta[]; // 파일 본체는 별도 blob(library/f/<hash>)
+}
+
+// 보관함 메타데이터만 모아 매니페스트로. 파일 본체는 읽지 않는다(가볍다).
+export async function exportManifest(): Promise<LibraryManifest> {
+  const [arts, secs] = await Promise.all([listArtworks(), listSections()]);
+  return {
+    version: LIBRARY_MANIFEST_VERSION,
+    exportedAt: Date.now(),
+    sections: secs,
+    artworks: arts.map((a) => ({ hash: a.hash, name: a.name, size: a.size,
+                                 type: a.type, section: a.section })),
+  };
+}
+
+// 두 매니페스트를 합친다(공용 보관함이라 남의 항목을 지우면 안 된다).
+// 같은 키는 primary가 이긴다 — 올리는 쪽의 최신 상태를 반영.
+export function mergeManifests(
+  primary: LibraryManifest, other: LibraryManifest | null): LibraryManifest {
+  if (!other) return primary;
+  const secs = new Map((other.sections ?? []).map((s) => [s.id, s]));
+  for (const s of primary.sections) secs.set(s.id, s);
+  const arts = new Map((other.artworks ?? []).map((a) => [a.hash, a]));
+  for (const a of primary.artworks) arts.set(a.hash, a);
+  return { version: LIBRARY_MANIFEST_VERSION, exportedAt: primary.exportedAt,
+           sections: [...secs.values()], artworks: [...arts.values()] };
+}
+
+// 보관함에 이미 있는 해시 집합 — 올릴/받을 목록을 추리는 데 쓴다(본체 미로드).
+export async function listArtworkHashes(): Promise<Set<string>> {
+  try {
+    const keys = await tx<IDBValidKey[]>("artworks", "readonly",
+      (s) => s.getAllKeys());
+    return new Set((keys ?? []).map(String));
+  } catch { return new Set(); }
+}
+
+export async function getArtworkBlob(hash: string): Promise<Blob | null> {
+  try {
+    const rec = await tx<Omit<ArtworkEntry, "hash">>(
+      "artworks", "readonly", (s) => s.get(hash));
+    return rec?.blob ?? null;
+  } catch { return null; }
+}
+
+// 서버에서 받은 파일 1개를 보관함에 넣는다(이미 있으면 폴더 배정만 유지).
+export async function saveArtworkBlob(
+  meta: ArtworkMeta, blob: Blob): Promise<void> {
+  await tx("artworks", "readwrite", (s) =>
+    s.put({ name: meta.name, size: meta.size, type: meta.type, blob,
+            lastUsed: Date.now(), section: meta.section }, meta.hash));
+}
+
+// 폴더 구조를 통째로 반영(id 보존 — parentId 링크가 유지돼야 한다).
+export async function putSections(secs: Section[]): Promise<void> {
+  for (const sec of secs) await putSection(sec);
+}
+
+// ------------------------------------------------ 구버전 백업 복원(v1 호환)
+// v1은 보관함 전체를 base64 JSON 한 파일에 담았다. 새로 만들지는 않지만,
+// 서버/디스크에 남아 있는 옛 백업을 되살릴 수 있어야 하므로 읽기는 유지한다.
 export interface LibraryBackup {
   version: number;
   exportedAt: number;
@@ -308,43 +410,11 @@ export interface LibraryBackup {
               section?: string; dataB64: string }[];
 }
 
-// 큰 바이너리도 콜스택 넘치지 않게 청크 단위로 base64 인코딩.
-function bytesToB64(bytes: Uint8Array): string {
-  let bin = "";
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK)
-    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  return btoa(bin);
-}
 function b64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
-}
-
-// Blob→바이트. 브라우저는 arrayBuffer()가 항상 있지만, 저장소가 돌려준 값이
-// 그렇지 않은 환경(fake-indexeddb 등)도 있어 한 겹 감싸는 폴백을 둔다.
-async function readBytes(b: Blob): Promise<Uint8Array> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const anyb = b as any;
-  if (typeof anyb?.arrayBuffer === "function")
-    return new Uint8Array(await anyb.arrayBuffer());
-  // 폴백 — 저장소가 arrayBuffer 없는 값(fake-indexeddb 등)을 돌려주면 실 Blob으로
-  // 한 겹 감싸 바이트를 얻는다.
-  return new Uint8Array(await new Blob([anyb]).arrayBuffer());
-}
-
-// 보관함 전체를 백업 객체로 내보낸다(다운로드는 호출측에서 Blob으로).
-export async function exportLibrary(): Promise<LibraryBackup> {
-  const [arts, secs] = await Promise.all([listArtworks(), listSections()]);
-  const artworks = await Promise.all(arts.map(async (a) => ({
-    hash: a.hash, name: a.name, size: a.size, type: a.type,
-    section: a.section,
-    dataB64: bytesToB64(await readBytes(a.blob)),
-  })));
-  return { version: LIBRARY_BACKUP_VERSION, exportedAt: Date.now(),
-           sections: secs, artworks };
 }
 
 // 섹션 upsert — 원래 id를 보존해 parentId 링크가 유지되게 한다(복원 전용).
@@ -353,17 +423,11 @@ async function putSection(sec: Section): Promise<void> {
   catch { /* 무시 */ }
 }
 
-// 백업을 되살린다. 기본은 병합(기존 보관함에 더한다) — 같은 해시/섹션 id는
-// 덮어쓴다. replace=true면 기존 보관함을 먼저 비운다.
-export async function importLibrary(
-  backup: LibraryBackup, opts: { replace?: boolean } = {}):
+// v1 백업을 되살린다 — 병합(기존 보관함에 더한다). 같은 해시/섹션 id는 덮어쓴다.
+export async function importLibrary(backup: LibraryBackup):
   Promise<{ artworks: number; sections: number }> {
   if (!backup || typeof backup !== "object" || !Array.isArray(backup.artworks))
     throw new Error("백업 파일 형식이 올바르지 않습니다.");
-  if (opts.replace) {
-    for (const s of await listSections()) await deleteSection(s.id);
-    for (const a of await listArtworks()) await deleteArtwork(a.hash);
-  }
   for (const sec of backup.sections ?? []) await putSection(sec);
   let n = 0;
   for (const a of backup.artworks) {

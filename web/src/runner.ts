@@ -186,8 +186,11 @@ export async function runAll(
                                refCanvas, alignedCanvas,
                                refFile: ref, testFile: test });
         } catch (err) {
+          // 실패해도 입력 파일 정보는 남긴다 — 오류 보고에 어떤 파일이었는지
+          // 담고, 사용자가 그대로 다시 시도할 수 있게 한다.
           cb.onResult(index, { name, setId, page, pageCount,
-                               error: String((err as Error).message || err) });
+                               error: String((err as Error).message || err),
+                               refFile: ref, testFile: test });
         }
       }
     } finally {

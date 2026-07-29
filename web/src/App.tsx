@@ -3,18 +3,19 @@
 // 우측 상세(마스터-디테일). 다중 세트는 메모리가 허용하면 동시 2세트 병렬.
 import React, { useEffect, useRef, useState } from "react";
 import { clearSession, createSection, deleteArtwork, deleteSection,
-         exportLibrary, getArtworkFile, hashFile, importLibrary, listArtworks,
-         listSections, loadSession, renameSection, requestPersistentStorage,
-         saveArtwork, saveSession, setArtworkSection, type ArtworkEntry,
-         type LibraryBackup, type Section, type StoredSet } from "./cache.ts";
+         getArtworkFile, hashFile, listArtworks, listSections, loadSession,
+         moveSection, renameSection, requestPersistentStorage, saveArtwork,
+         saveSession, setArtworkSection, storageEstimate, type ArtworkEntry,
+         type Section, type StoredSet } from "./cache.ts";
 import { MultiDropZone, FeedbackModal, ResultDetail,
          type ModalState } from "./components.tsx";
-import { applySetName, buildFeedbackPayload, download, feedbackCsv, flushFbQueue,
-         fmtDateTime, fmtMB, hasFeedbackEndpoint, loadFbQueue, restoreResults,
-         saveFbQueue, serializeResults, slimPayload,
-         trySendFeedback } from "./lib.ts";
-import { hasLibraryServer, pullLibraryFromServer,
-         pushLibraryToServer } from "./server-library.ts";
+import { applySetName, buildErrorReport, buildFeedbackPayload, copyToClipboard,
+         download, entryDay, feedbackCsv, flushFbQueue, fmtDateTime, fmtMB,
+         hasFeedbackEndpoint, loadFbQueue, restoreResults, saveFbQueue,
+         serializeResults, slimPayload, summarizeFeedbackForChat,
+         trySendFeedback, type AdminEntry } from "./lib.ts";
+import { hasLibraryServer, pullLibraryFromServer, pushLibraryToServer,
+         type SyncProgress } from "./server-library.ts";
 import { runAll, type RunSet } from "./runner.ts";
 import { ensureRasterPages } from "./pipeline/pdf.ts";
 import { branding } from "./branding.ts";
@@ -37,9 +38,16 @@ export default function App() {
   const [adminPw, setAdminPw] = useState("");
   const [adminErr, setAdminErr] = useState("");
   const [adminBusy, setAdminBusy] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [adminData, setAdminData] = useState<{ count: number; items: any[] } | null>(null);
+  const [adminData, setAdminData] =
+    useState<{ count: number; items: AdminEntry[] } | null>(null);
   const authedPwRef = useRef("");  // 로그인 후 목록 새로고침에 재사용(메모리만)
+  // 피드백 페이지 — 확인 처리된 id, 날짜 그룹 접힘, 필터, 상태 메시지
+  const [adminRead, setAdminRead] = useState<string[]>([]);
+  const [adminClosed, setAdminClosed] = useState<Record<string, boolean>>({});
+  const [adminOnlyNew, setAdminOnlyNew] = useState(false);
+  const [adminMsg, setAdminMsg] = useState("");
+  // 삭제 확인 대기 — 브라우저 confirm 대신 버튼을 두 번 눌러 확정한다.
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [pairs, setPairs] = useState<Pair[]>(
     [{ id: ++pairSeq, ref: [], test: [] }]);
   const [useOcr, setUseOcr] = useState(true);
@@ -52,6 +60,9 @@ export default function App() {
   const [selected, setSelected] = useState(0);
   const [fbStatus, setFbStatus] = useState("");
   const [sendingIdx, setSendingIdx] = useState<number | null>(null);
+  // 분석 실패 페이지의 오류 보고 — 열려 있는 결과 인덱스와 사용자가 적은 메모
+  const [errOpen, setErrOpen] = useState<number | null>(null);
+  const [errNote, setErrNote] = useState<Record<number, string>>({});
   const [modal, setModalState] =
     useState<{ idx: number; m: ModalState } | null>(null);
   const [recent, setRecent] = useState<ArtworkEntry[]>([]);
@@ -63,14 +74,20 @@ export default function App() {
   const [addingSection, setAddingSection] = useState(false);
   const [sectionDraft, setSectionDraft] = useState("");
   const [editingSection, setEditingSection] = useState<string | null>(null);
-  const [libStatus, setLibStatus] = useState(""); // 백업/복원 안내
-  const [hoverTip, setHoverTip] = useState(""); // 백업/복원 버튼 호버 설명
-  const libImportRef = useRef<HTMLInputElement>(null);
+  const [libStatus, setLibStatus] = useState(""); // 서버 동기화 안내
+  const [hoverTip, setHoverTip] = useState(""); // 버튼 호버 설명
   // 서버 보관함 동기화 — 비번 입력 프롬프트 상태
   const [serverAct, setServerAct] = useState<"push" | "pull" | null>(null);
   const [serverPw, setServerPw] = useState("");
   const [serverBusy, setServerBusy] = useState(false);
   const [dragOverSec, setDragOverSec] = useState<string | null>(null);
+  // 폴더를 드래그 중일 때 그 폴더 id — 자기 자신 위로는 드롭 표시를 하지 않는다.
+  const [dragSec, setDragSec] = useState<string | null>(null);
+  // 보관함으로 직접 떨어뜨린 파일을 저장하는 중인 폴더 id(""=미분류)
+  const [libDropBusy, setLibDropBusy] = useState(false);
+  // 저장소 사용량 — 보관함이 커질 때 한계를 미리 알리기 위한 표시
+  const [storage, setStorage] =
+    useState<{ usage: number; quota: number; persisted: boolean } | null>(null);
   const [editingSet, setEditingSet] = useState<number | null>(null); // 이름 편집 중인 setId
   const [restored, setRestored] = useState(false);
   // 분석 수행 시각 — 결과가 7일 보존되므로 언제 분석한 것인지 표시한다
@@ -84,11 +101,35 @@ export default function App() {
 
   const pushLog = (m: string) => setLogs((l) => [...l, m]);
 
-  // 보관함(아트웍 + 섹션) 새로고침
+  // 보관함(원본 + 폴더) 새로고침. 저장소 사용량도 같이 갱신한다.
   const refreshLibrary = () =>
-    Promise.all([listArtworks(), listSections()]).then(([a, s]) => {
-      setRecent(a); setSections(s);
-    });
+    Promise.all([listArtworks(), listSections(), storageEstimate()])
+      .then(([a, s, st]) => { setRecent(a); setSections(s); setStorage(st); });
+
+  // 보관함에 파일을 직접 넣는다(사이드바로 끌어놓기). 원본 파일 그대로 저장하고
+  // 떨어뜨린 폴더에 배정한다. 이미지가 아닌 파일은 조용히 무시한다.
+  const addFilesToLibrary = async (files: File[], section: string) => {
+    const accepted = files.filter((f) =>
+      /\.(png|jpe?g|pdf)$/i.test(f.name) ||
+      /^(image\/(png|jpeg)|application\/pdf)$/.test(f.type));
+    if (accepted.length === 0) {
+      setLibStatus("PNG · JPG · PDF 파일만 보관함에 넣을 수 있습니다.");
+      return;
+    }
+    setLibDropBusy(true);
+    try {
+      for (const f of accepted)
+        await saveArtwork(await hashFile(f), f, section || undefined);
+      await refreshLibrary();
+      setLibStatus(`보관함에 ${accepted.length}개 저장됨` +
+        (accepted.length < files.length
+          ? ` (${files.length - accepted.length}개는 형식이 맞지 않아 제외)` : ""));
+    } catch (e) {
+      setLibStatus("보관함 저장 실패: " + String((e as Error).message || e));
+    } finally {
+      setLibDropBusy(false);
+    }
+  };
 
   // 파일 추가: 각 파일을 페이지 PNG로 펼쳐(PDF면 여러 장) 세트의 해당 면에
   // 누적한다. 같은 이름은 제자리에서 덮어쓰고, 새로 온 파일은 이름순으로만
@@ -116,10 +157,12 @@ export default function App() {
                  name: setName !== undefined ? setName : p.name };
       }));
       // 원본 파일은 보관함에 영구 저장(원본 그대로 — 재사용 시 재래스터화).
+      // 저장이 끝난 뒤에 새로고침해야 방금 넣은 파일이 바로 보인다 — 예전에는
+      // 저장을 기다리지 않고 목록을 읽어 새로고침해야 나타났다.
       if (which === "ref") {
-        for (const e of newEntries)
-          hashFile(e.file).then((h) => saveArtwork(h, e.file)).catch(() => {});
-        refreshLibrary();
+        await Promise.all(newEntries.map((e) =>
+          hashFile(e.file).then((h) => saveArtwork(h, e.file)).catch(() => {})));
+        await refreshLibrary();
       }
     } catch (err) {
       setError(`파일 처리 실패: ` + String((err as Error).message || err));
@@ -211,7 +254,8 @@ export default function App() {
     await addArtworkToPair(target, "ref", hash);
   };
 
-  // 보관함 섹션(폴더) 관리 — 선택된 상위 섹션이 있으면 그 아래에 만든다.
+  // 보관함 폴더 관리 — 선택된 상위 폴더가 있으면 그 아래에 만든다.
+  // (내부 자료형 이름은 Section 그대로 두고 화면 용어만 '폴더'로 통일했다.)
   const onAddSection = async () => {
     const name = sectionDraft.trim();
     const parent = selectedSection ?? undefined;
@@ -237,34 +281,26 @@ export default function App() {
   const onSetSection = async (hash: string, section: string) => {
     await setArtworkSection(hash, section || undefined); refreshLibrary();
   };
-
-  // 보관함 백업/복원(안 C) — 서버 없이도 유실에 대비하는 최소 안전망.
-  const onExportLibrary = async () => {
-    setLibStatus("백업 파일 만드는 중…");
-    try {
-      const backup = await exportLibrary();
-      const stamp = fmtDateTime(backup.exportedAt).replace(/[^\d]/g, "");
-      download(`보관함백업_${stamp}.json`,
-        new Blob([JSON.stringify(backup)], { type: "application/json" }));
-      setLibStatus(`백업 완료 — 아트웍 ${backup.artworks.length}개 · ` +
-        `섹션 ${backup.sections.length}개`);
-    } catch (e) {
-      setLibStatus("백업 실패: " + String((e as Error).message || e));
+  // 폴더를 다른 폴더 안으로 이동. 자기 자신·자기 하위로는 못 옮긴다(cache에서 차단).
+  const onMoveSection = async (id: string, parent: string) => {
+    const ok = await moveSection(id, parent || undefined);
+    if (!ok && parent) {
+      setLibStatus("자기 자신이나 하위 폴더로는 옮길 수 없습니다.");
+      return;
     }
-  };
-  const onImportLibrary = async (file: File) => {
-    setLibStatus("복원 중…");
-    try {
-      const backup = JSON.parse(await file.text()) as LibraryBackup;
-      const r = await importLibrary(backup); // 병합(기존에 더함)
-      await refreshLibrary();
-      setLibStatus(`복원 완료 — 아트웍 ${r.artworks}개 · 섹션 ${r.sections}개 반영`);
-    } catch (e) {
-      setLibStatus("복원 실패: " + String((e as Error).message || e));
-    }
+    if (parent) setExpanded((x) => ({ ...x, [parent]: true }));
+    refreshLibrary();
   };
 
-  // 서버 보관함 동기화(안 A) — 비번 확인 후 업로드/불러오기.
+  // 서버 보관함 동기화(안 A) — 백업 수단은 이것 하나로 통일했다. 로컬 파일
+  // 백업은 사용자가 매번 직접 받아둬야 하고 그 PC가 고장나면 같이 사라져,
+  // 공용 서버 쪽이 팀 공유·기기 교체까지 함께 막아준다.
+  // 파일 단위 증분 전송이라 이미 서버에 있는 원본은 건너뛴다.
+  const onSyncProgress = (p: SyncProgress) =>
+    setLibStatus(p.total > 1
+      ? `${p.phase} ${p.done}/${p.total}…`
+      : `${p.phase}…`);
+
   const runServerSync = async () => {
     const act = serverAct, pw = serverPw;
     setServerAct(null); setServerPw("");
@@ -273,13 +309,15 @@ export default function App() {
     setLibStatus(act === "push" ? "서버로 백업 중…" : "서버에서 불러오는 중…");
     try {
       if (act === "push") {
-        const r = await pushLibraryToServer(pw);
-        setLibStatus(`서버 백업 완료 — 아트웍 ${r.artworks}개 · 섹션 ${r.sections}개`);
+        const r = await pushLibraryToServer(pw, onSyncProgress);
+        setLibStatus(`서버 백업 완료 — 원본 ${r.artworks}개 · 폴더 ${r.sections}개` +
+          ` (새로 올림 ${r.moved}개 · 이미 있던 것 ${r.skipped}개)`);
       } else {
-        const r = await pullLibraryFromServer(pw);
+        const r = await pullLibraryFromServer(pw, onSyncProgress);
         if (!r) { setLibStatus("서버에 저장된 백업이 아직 없습니다."); return; }
         await refreshLibrary();
-        setLibStatus(`서버에서 불러옴 — 아트웍 ${r.artworks}개 · 섹션 ${r.sections}개 반영`);
+        setLibStatus(`서버에서 불러옴 — 원본 ${r.artworks}개 · 폴더 ${r.sections}개` +
+          ` (새로 받음 ${r.moved}개 · 이미 있던 것 ${r.skipped}개)`);
       }
     } catch (e) {
       setLibStatus((act === "push" ? "서버 백업 실패: " : "불러오기 실패: ") +
@@ -298,14 +336,25 @@ export default function App() {
     onBlur: () => setHoverTip((c) => (c === t ? "" : c)),
   });
 
-  // 보관함 아트웍 한 행: 클릭해 투입 + 드래그해서 섹션 이동 + 삭제.
+  // 저장소 사용량 안내 — 보관함이 커지면 브라우저 할당량이 한계가 되므로
+  // 미리 보여준다. persisted가 아니면 저장공간 압박 시 통째로 지워질 수 있다.
+  const storageNote = (() => {
+    if (!storage?.quota) return null;
+    const pct = storage.usage / storage.quota;
+    const text = `원본 ${recent.length}개 · ${fmtMB(storage.usage)} 사용` +
+      ` / 한도 ${fmtMB(storage.quota)} (${Math.round(pct * 100)}%)` +
+      (storage.persisted ? "" : " · 자동삭제 방지 미적용");
+    return { text, warn: pct > 0.8 || !storage.persisted };
+  })();
+
+  // 보관함 원본 한 행: 클릭해 투입 + 드래그해서 폴더 이동 + 삭제.
   const renderArtwork = (a: ArtworkEntry) => (
     <div className="artitem-row" key={a.hash} draggable={!running}
          onDragStart={(e) => {
            e.dataTransfer.setData("text/hash", a.hash);
            e.dataTransfer.effectAllowed = "move";
          }}>
-      <span className="art-grip" title="드래그해서 섹션으로 이동">⠿</span>
+      <span className="art-grip" title="드래그해서 폴더로 이동">⠿</span>
       <button type="button" className="artitem" disabled={running}
               title={`${a.name} (${fmtMB(a.size)}) — 클릭해서 원본에 투입`}
               onClick={() => applyArtwork(a.hash)}>
@@ -316,36 +365,57 @@ export default function App() {
               title="보관함에서 삭제" onClick={() => onDeleteArtwork(a.hash)}>✕</button>
     </div>
   );
-  // 드롭 대상(섹션/미분류) 공통 핸들러. 중첩 섹션에서 부모로 버블링되지 않게
-  // stopPropagation — 가장 안쪽(놓은) 섹션에만 배정된다.
+
+  // 드롭 대상(폴더/미분류) 공통 핸들러. 받는 것은 세 가지다.
+  //  1) 보관함 원본(text/hash)     — 그 폴더로 분류 이동
+  //  2) 폴더(text/section)         — 그 폴더의 하위로 이동
+  //  3) 바깥에서 끌어온 파일        — 보관함에 저장하며 그 폴더에 배정
+  // 중첩 폴더에서 부모로 버블링되지 않게 stopPropagation — 가장 안쪽에만 적용.
   const dropProps = (sectionId: string) => ({
     onDragOver: (e: React.DragEvent) => {
+      if (running) return;
       e.preventDefault(); e.stopPropagation();
       e.dataTransfer.dropEffect = "move";
-      setDragOverSec(sectionId);
+      // 자기 자신 위로 끌고 있을 때는 드롭 강조를 하지 않는다.
+      setDragOverSec(dragSec && dragSec === sectionId ? null : sectionId);
     },
     onDragLeave: () => setDragOverSec((s) => (s === sectionId ? null : s)),
     onDrop: (e: React.DragEvent) => {
+      if (running) return;
       e.preventDefault(); e.stopPropagation();
-      const hash = e.dataTransfer.getData("text/hash");
       setDragOverSec(null);
+      const hash = e.dataTransfer.getData("text/hash");
+      const sec = e.dataTransfer.getData("text/section");
+      const files = [...(e.dataTransfer.files ?? [])];
       if (hash) onSetSection(hash, sectionId);
+      else if (sec) { setDragSec(null); onMoveSection(sec, sectionId); }
+      else if (files.length) addFilesToLibrary(files, sectionId);
     },
   });
 
-  // 섹션(폴더) 재귀 렌더 — 기본 닫힘, 선택된 상위 섹션은 강조.
-  // depth로 들여쓰기. 자식 섹션은 부모가 펼쳐졌을 때만 보인다.
+  // 폴더 재귀 렌더 — 기본 닫힘, 선택된 상위 폴더는 강조. depth로 들여쓰기.
+  // 자식 폴더는 부모가 펼쳐졌을 때만 보인다. 폴더 자체도 드래그해 옮길 수 있다.
   const renderSection = (s: Section, depth: number): React.ReactNode => {
     const arts = recent.filter((a) => a.section === s.id);
     const children = sections.filter((c) => c.parentId === s.id);
     const isOpen = !!expanded[s.id];
     const isSel = selectedSection === s.id;
     return (
-      <div className={"sec-group" + (dragOverSec === s.id ? " dragover" : "")}
+      <div className={"sec-group" +
+             (dragOverSec === s.id ? " dragover" : "") +
+             (dragSec === s.id ? " dragging" : "")}
            key={s.id} {...dropProps(s.id)}>
         <div className={"sec-head" + (isSel ? " selected" : "")}
-             style={{ paddingLeft: depth * 14 }}>
-          <button type="button" className="sec-toggle"
+             style={{ paddingLeft: depth * 12 }}
+             draggable={!running && editingSection !== s.id}
+             onDragStart={(e) => {
+               e.stopPropagation();
+               e.dataTransfer.setData("text/section", s.id);
+               e.dataTransfer.effectAllowed = "move";
+               setDragSec(s.id);
+             }}
+             onDragEnd={() => { setDragSec(null); setDragOverSec(null); }}>
+          <button type="button" className="sec-toggle" disabled={running}
                   onClick={() => setExpanded((x) => ({ ...x, [s.id]: !x[s.id] }))}
                   title={isOpen ? "접기" : "펼치기"}>
             {isOpen ? "▾" : "▸"}
@@ -359,37 +429,31 @@ export default function App() {
               }} />
           ) : (
             <span className="sec-name"
-                  title="클릭: 선택(여기에 하위 섹션 추가) · 더블클릭: 이름 변경"
+                  title={"클릭: 선택(＋폴더가 여기 아래에 생깁니다) · " +
+                         "더블클릭: 이름 변경 · 드래그: 다른 폴더로 이동"}
                   onClick={() => !running &&
                     setSelectedSection((cur) => (cur === s.id ? null : s.id))}
                   onDoubleClick={() => !running && setEditingSection(s.id)}>
-              {s.name} <span className="sec-count">{arts.length}</span>
+              📁 {s.name} <span className="sec-count">{arts.length}</span>
               {children.length > 0 &&
                 <span className="sec-count">· {children.length}폴더</span>}
             </span>
           )}
           <span style={{ flex: 1 }} />
-          <button type="button" className="sec-btn" title="하위 섹션 추가"
-                  disabled={running}
-                  onClick={() => {
-                    setSelectedSection(s.id);
-                    setExpanded((x) => ({ ...x, [s.id]: true }));
-                    setAddingSection(true);
-                  }}>＋</button>
           <button type="button" className="sec-btn" title="이름 변경"
                   disabled={running}
                   onClick={() => setEditingSection(s.id)}>✎</button>
-          <button type="button" className="sec-btn" title="섹션 삭제(원본은 미분류로)"
+          <button type="button" className="sec-btn" title="폴더 삭제(원본은 미분류로)"
                   disabled={running}
                   onClick={() => onDeleteSection(s.id)}>🗑</button>
         </div>
         {isOpen && (
           <>
+            {children.map((c) => renderSection(c, depth + 1))}
             {arts.map(renderArtwork)}
             {arts.length === 0 && children.length === 0 && (
-              <div className="sec-empty">여기로 드래그해 정리하세요</div>
+              <div className="sec-empty">여기로 파일이나 폴더를 끌어놓으세요</div>
             )}
-            {children.map((c) => renderSection(c, depth + 1))}
           </>
         )}
       </div>
@@ -511,6 +575,40 @@ export default function App() {
     }
   }
 
+  // 분석이 실패한 페이지의 오류 보고 — 결함 크롭이 없어 일반 피드백을 만들 수
+  // 없으므로, 오류 문구·입력 파일 정보·실행 로그만 모아 바로 보낼 수 있게 한다.
+  async function sendErrorReport(idx: number) {
+    const item = results[idx];
+    if (!item?.error) return;
+    setSendingIdx(idx);
+    const setStatus = (msg: string) =>
+      setResults((rs) => rs.map((it, i) =>
+        i === idx ? { ...it, fbStatus: msg } : it));
+    try {
+      const payload = buildErrorReport([item], logs, errNote[idx]);
+      if (!hasFeedbackEndpoint) {
+        download(`error_${Date.now()}.json`, new Blob(
+          [JSON.stringify(payload)], { type: "application/json" }));
+        setStatus("파일로 저장됨 — 품질 담당자에게 전달해주세요.");
+        return;
+      }
+      if (await trySendFeedback(payload)) {
+        setStatus("오류 보고 전송 완료 ✓");
+        setErrOpen(null);
+        return;
+      }
+      // 연결 불가 — 일반 피드백과 같은 보류 큐에 넣어 다음 방문에 재전송.
+      const q = loadFbQueue();
+      q.push(payload);
+      if (saveFbQueue(q))
+        setStatus("서버 연결 불가 — 보관됨, 다음 방문 시 자동 전송");
+      else
+        setStatus("전송·보관 모두 실패했습니다. 로그를 복사해 전달해주세요.");
+    } finally {
+      setSendingIdx(null);
+    }
+  }
+
   // 관리자 조회 — 비번을 수집기 서버로 보내 대조한 뒤 목록을 받아온다.
   async function submitAdmin(e?: React.FormEvent, pw?: string) {
     e?.preventDefault();
@@ -532,6 +630,7 @@ export default function App() {
       const data = await r.json();
       authedPwRef.current = password;   // 세션 동안만 메모리에 보관(비저장)
       setAdminData(data);
+      setAdminRead(Array.isArray(data.read) ? data.read : []);
       setAdminOpen(false);
       setAdminPw("");
       setView("admin");
@@ -541,6 +640,55 @@ export default function App() {
       setAdminBusy(false);
     }
   }
+
+  // 피드백 관리 액션(확인 토글·삭제) — 로그인 때 쓴 비번을 그대로 재사용.
+  async function adminPost(body: Record<string, unknown>) {
+    const url = branding.feedback?.adminUrl;
+    if (!url || !authedPwRef.current) throw new Error("로그인이 필요합니다.");
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...body, password: authedPwRef.current }),
+    });
+    if (!r.ok) throw new Error(`서버 오류: ${r.status}`);
+    return r.json();
+  }
+
+  // 확인/미확인 토글. 먼저 화면을 바꾸고(즉각 반응) 실패하면 되돌린다.
+  const setEntriesRead = async (ids: string[], read: boolean) => {
+    if (!ids.length) return;
+    const before = adminRead;
+    setAdminRead(read
+      ? [...new Set([...before, ...ids])]
+      : before.filter((x) => !ids.includes(x)));
+    setAdminMsg("");
+    try {
+      const r = await adminPost({ action: "read", ids, read });
+      if (Array.isArray(r.read)) setAdminRead(r.read);
+    } catch (e) {
+      setAdminRead(before);
+      setAdminMsg("상태 저장 실패: " + String((e as Error).message || e));
+    }
+  };
+
+  const deleteEntries = async (ids: string[]) => {
+    if (!ids.length) return;
+    setAdminBusy(true);
+    setAdminMsg("");
+    try {
+      await adminPost({ action: "delete", ids });
+      setAdminData((d) => d && {
+        ...d, count: Math.max(0, d.count - ids.length),
+        items: d.items.filter((it: AdminEntry) => !ids.includes(it.id)) });
+      setAdminRead((r) => r.filter((x) => !ids.includes(x)));
+      setAdminMsg(`${ids.length}건 삭제됨`);
+    } catch (e) {
+      setAdminMsg("삭제 실패: " + String((e as Error).message || e));
+    } finally {
+      setAdminBusy(false);
+      setPendingDelete(null);
+    }
+  };
 
   // 피드백 모달 저장/삭제 — 사이드바·상세 어디에서 열었든 여기서 처리
   const saveModal = (v: { fp: boolean; cause: string; comment: string }) => {
@@ -677,6 +825,37 @@ export default function App() {
           </span>
           {badge}
         </div>
+        {/* 실패한 페이지 — 오류 문구를 보여주고 그 자리에서 보고할 수 있게 한다 */}
+        {item.error && (
+          <div className="errbox">
+            <p className="errmsg" title={item.error}>{item.error}</p>
+            {errOpen === rIdx ? (
+              <>
+                <textarea className="errnote" autoFocus
+                  placeholder="무엇을 하다가 실패했는지 적어주세요(선택)"
+                  value={errNote[rIdx] ?? ""}
+                  onChange={(e) =>
+                    setErrNote((n) => ({ ...n, [rIdx]: e.target.value }))} />
+                <div className="fbsend">
+                  <button type="button" className="go save"
+                          disabled={sendingIdx === rIdx}
+                          onClick={() => sendErrorReport(rIdx)}>
+                    {sendingIdx === rIdx ? "전송 중…" : "오류 보고 보내기"}
+                  </button>
+                  <button type="button" className="rm"
+                          onClick={() => setErrOpen(null)}>취소</button>
+                </div>
+                <p className="note errhint">
+                  오류 문구 · 파일 이름/크기 · 실행 로그만 보냅니다(이미지 제외).
+                </p>
+              </>
+            ) : (
+              <button type="button" className="rm errsend"
+                      onClick={() => setErrOpen(rIdx)}>⚠ 오류 보고</button>
+            )}
+            {item.fbStatus && <span className="note">{item.fbStatus}</span>}
+          </div>
+        )}
         {fbEntries.map((e) => (
           <button type="button" key={e.key} className="fbrow"
                   onClick={() => { setSelected(gi); setModalState({ idx: rIdx, m: e.m }); }}>
@@ -750,25 +929,71 @@ export default function App() {
   );
 
   // 수집된 피드백 1건(제출 단위) 렌더 — 세트별 결함/누락과 크롭 이미지.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const renderAdminEntry = (entry: any, i: number) => {
-    const data = entry?.data ?? {};
-    const when = entry?.received || entry?.uploadedAt;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sets: any[] = Array.isArray(data.items) ? data.items : [];
+  // 머리글에 확인/미확인 스위치와 삭제(두 번 눌러 확정)를 둔다.
+  const renderAdminEntry = (entry: AdminEntry) => {
+    const data = entry.data ?? {};
+    const when = entry.received || entry.uploadedAt;
+    const sets = Array.isArray(data.items) ? data.items : [];
+    const isRead = adminRead.includes(entry.id);
+    const confirming = pendingDelete === entry.id;
+    const isErrorReport = data.kind === "error";
     return (
-      <div className="admin-entry" key={entry?.pathname || i}>
+      <div className={"admin-entry" + (isRead ? " read" : "")} key={entry.id}>
         <div className="admin-entry-head">
+          <button type="button"
+                  className={"admin-switch" + (isRead ? " on" : "")}
+                  title={isRead ? "확인함 — 눌러서 미확인으로" : "미확인 — 눌러서 확인 처리"}
+                  onClick={() => setEntriesRead([entry.id], !isRead)}>
+            <span className="admin-switch-knob" />
+            <span className="admin-switch-label">{isRead ? "확인" : "미확인"}</span>
+          </button>
           <b>{when ? new Date(when).toLocaleString("ko-KR") : "시간 미상"}</b>
-          <span className="admin-origin">{entry?.origin || data.origin || ""}</span>
+          <span className="admin-origin">{entry.origin || ""}</span>
+          <code className="admin-id" title="이 피드백의 id (복사 내용과 대조용)">
+            {entry.id}</code>
           <span className="admin-ver">v{data.version || "?"}</span>
+          {confirming ? (
+            <span className="admin-confirm">
+              <button type="button" className="rm danger" disabled={adminBusy}
+                      onClick={() => deleteEntries([entry.id])}>정말 삭제</button>
+              <button type="button" className="rm"
+                      onClick={() => setPendingDelete(null)}>취소</button>
+            </span>
+          ) : (
+            <button type="button" className="admin-del" title="이 피드백 삭제"
+                    onClick={() => setPendingDelete(entry.id)}>🗑</button>
+          )}
         </div>
-        {sets.map((s, si) => {
+        {entry.error && <div className="admin-empty-set">본문을 읽지 못했습니다: {entry.error}</div>}
+        {isErrorReport && (
+          <div className="admin-errreport">
+            <span className="admin-tag err">분석 실패 보고</span>
+            {sets.map((s, si) => (
+              <div className="admin-set" key={si}>
+                <div className="admin-set-name">
+                  {s.set || `세트 ${si + 1}`}
+                  {s.page ? ` · 페이지 ${s.page}` : ""}</div>
+                <div className="admin-errmsg">{s.error || "오류 문구 없음"}</div>
+                {s.note && <div className="admin-comment">“{s.note}”</div>}
+                <div className="admin-files">
+                  {s.refFile && <span>원본: {s.refFile.name} ({fmtMB(s.refFile.size)})</span>}
+                  {s.testFile && <span>인쇄물: {s.testFile.name} ({fmtMB(s.testFile.size)})</span>}
+                </div>
+                {s.ua && <div className="admin-ua">{s.ua}</div>}
+                {!!s.logs?.length && (
+                  <details>
+                    <summary className="note">실행 로그 {s.logs.length}줄</summary>
+                    <div className="logbox">{s.logs.join("\n")}</div>
+                  </details>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {!isErrorReport && sets.map((s, si) => {
           const fb = s?.feedback ?? {};
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const defects: any[] = Array.isArray(fb.defects) ? fb.defects : [];
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const missed: any[] = Array.isArray(fb.missed) ? fb.missed : [];
+          const defects = Array.isArray(fb.defects) ? fb.defects : [];
+          const missed = Array.isArray(fb.missed) ? fb.missed : [];
           return (
             <div className="admin-set" key={si}>
               <div className="admin-set-name">{s?.set || `세트 ${si + 1}`}</div>
@@ -804,23 +1029,83 @@ export default function App() {
   // ---------------------------------------------------------------- 관리자 페이지
   if (view === "admin") {
     const items = adminData?.items ?? [];
+    const unread = items.filter((e) => !adminRead.includes(e.id));
+    const shown = adminOnlyNew ? unread : items;
+    // 날짜별로 묶는다(최신 날짜가 위). 서버가 최신순으로 주므로 순서를 유지.
+    const days: { day: string; entries: AdminEntry[] }[] = [];
+    for (const e of shown) {
+      const day = entryDay(e);
+      const g = days.find((d) => d.day === day);
+      if (g) g.entries.push(e);
+      else days.push({ day, entries: [e] });
+    }
+    const copyUnread = async () => {
+      if (!unread.length) { setAdminMsg("미확인 피드백이 없습니다."); return; }
+      const ok = await copyToClipboard(summarizeFeedbackForChat(unread));
+      setAdminMsg(ok
+        ? `미확인 ${unread.length}건을 클립보드에 복사했습니다 — 그대로 붙여넣으세요.`
+        : "클립보드 복사에 실패했습니다.");
+    };
     return (
       <>
         {gnb}
         {adminModal}
         <div className="shell admin-shell">
           <div className="admin-head">
-            <h2>수집된 피드백 <span className="admin-count">{adminData?.count ?? items.length}건</span></h2>
+            <h2>수집된 피드백{" "}
+              <span className="admin-count">{adminData?.count ?? items.length}건</span>
+              {unread.length > 0 &&
+                <span className="admin-new">미확인 {unread.length}</span>}
+            </h2>
             <div className="admin-head-actions">
+              <label className="admin-filter">
+                <input type="checkbox" checked={adminOnlyNew}
+                       onChange={(e) => setAdminOnlyNew(e.target.checked)} />
+                미확인만 보기
+              </label>
+              <button className="rm" onClick={copyUnread} disabled={adminBusy}
+                      title="미확인 피드백 내용을 대화창에 붙여넣기 좋은 형태로 복사합니다">
+                📋 미확인 복사</button>
+              <button className="rm" disabled={adminBusy || !unread.length}
+                      onClick={() => setEntriesRead(unread.map((e) => e.id), true)}>
+                모두 확인 처리</button>
               <button className="rm"
                       onClick={() => submitAdmin(undefined, authedPwRef.current)}
                       disabled={adminBusy}>새로고침</button>
               <button className="rm" onClick={() => setView("upload")}>닫기</button>
             </div>
           </div>
-          {items.length === 0
-            ? <p className="admin-empty">아직 수집된 피드백이 없습니다.</p>
-            : items.map(renderAdminEntry)}
+          {adminMsg && <p className="admin-msg">{adminMsg}</p>}
+          {shown.length === 0 ? (
+            <p className="admin-empty">
+              {items.length === 0 ? "아직 수집된 피드백이 없습니다."
+                                  : "미확인 피드백이 없습니다."}</p>
+          ) : days.map(({ day, entries }) => {
+            const closed = !!adminClosed[day];
+            const dayUnread = entries.filter((e) => !adminRead.includes(e.id));
+            return (
+              <section className="admin-day" key={day}>
+                <div className="admin-day-head">
+                  <button type="button" className="admin-day-toggle"
+                          onClick={() => setAdminClosed((c) =>
+                            ({ ...c, [day]: !c[day] }))}>
+                    {closed ? "▸" : "▾"} {day}
+                    <span className="admin-count">{entries.length}건</span>
+                    {dayUnread.length > 0 &&
+                      <span className="admin-new">미확인 {dayUnread.length}</span>}
+                  </button>
+                  <span style={{ flex: 1 }} />
+                  {dayUnread.length > 0 && (
+                    <button type="button" className="rm" disabled={adminBusy}
+                            onClick={() => setEntriesRead(
+                              dayUnread.map((e) => e.id), true)}>
+                      이 날짜 확인 처리</button>
+                  )}
+                </div>
+                {!closed && entries.map(renderAdminEntry)}
+              </section>
+            );
+          })}
         </div>
       </>
     );
@@ -939,41 +1224,28 @@ export default function App() {
     <>
       {gnb}
       {adminModal}
-      <div className="shell">
+      {/* 검수 중에는 페이지 전체를 잠근다 — 버튼·드롭존이 실제로 비활성일 뿐
+          아니라 마우스 커서도 '클릭 불가'로 바뀌어 한눈에 알 수 있게 한다. */}
+      <div className={"shell" + (running ? " locked" : "")}>
         <div className="inspect">
           <aside className="artlib card">
             <div className="artlib-title">
               <span>원본 보관함</span>
               <button type="button" className="sec-add" disabled={running}
                       title={selectedSection
-                        ? "선택한 섹션 아래에 하위 섹션을 만듭니다"
-                        : "최상위 섹션을 만듭니다"}
-                      onClick={() => setAddingSection(true)}>＋ 섹션</button>
-            </div>
-            <div className="lib-tools">
-              <button type="button" disabled={running} onClick={onExportLibrary}
-                      {...tip("보관함 전체(원본 + 섹션)를 파일 하나로 내려받아 둡니다. 유실에 대비한 로컬 백업이에요.")}>
-                ⬇ 백업</button>
-              <button type="button" disabled={running}
-                      onClick={() => libImportRef.current?.click()}
-                      {...tip("백업 파일을 골라 보관함을 되살립니다. 기존 항목은 지우지 않고 병합돼요.")}>
-                ⬆ 복원</button>
-              <input ref={libImportRef} type="file" accept=".json,application/json"
-                     hidden onChange={(e) => {
-                       const f = e.target.files?.[0];
-                       if (f) onImportLibrary(f);
-                       e.target.value = "";
-                     }} />
+                        ? "선택한 폴더 아래에 하위 폴더를 만듭니다"
+                        : "최상위 폴더를 만듭니다"}
+                      onClick={() => setAddingSection(true)}>＋ 폴더</button>
             </div>
             {hasLibraryServer && (
               <div className="lib-tools">
                 <button type="button" disabled={running || serverBusy}
                         onClick={() => { setServerAct("push"); setServerPw(""); }}
-                        {...tip("로컬 보관함을 공용 서버에 올려 팀과 공유합니다. 비밀번호가 필요해요.")}>
+                        {...tip("보관함을 공용 서버에 올려 팀과 공유하고 유실에 대비합니다. 이미 올라간 원본은 건너뛰어요. 비밀번호가 필요해요.")}>
                   ☁ 서버백업</button>
                 <button type="button" disabled={running || serverBusy}
                         onClick={() => { setServerAct("pull"); setServerPw(""); }}
-                        {...tip("공용 서버의 최신 백업을 받아 로컬 보관함에 병합합니다. 비밀번호가 필요해요.")}>
+                        {...tip("공용 서버의 보관함을 받아 내 보관함에 합칩니다. 없는 원본만 내려받아요. 비밀번호가 필요해요.")}>
                   ☁ 불러오기</button>
               </div>
             )}
@@ -996,14 +1268,14 @@ export default function App() {
             {selectedSection && (
               <div className="sec-selbar">
                 <span>선택됨: <b>{sections.find((s) => s.id === selectedSection)?.name}</b>
-                  {" "}— ＋섹션은 이 아래에 생깁니다</span>
+                  {" "}— ＋폴더는 이 아래에 생깁니다</span>
                 <button type="button" onClick={() => setSelectedSection(null)}>해제</button>
               </div>
             )}
             {addingSection && (
               <div className="sec-edit">
                 <input autoFocus value={sectionDraft}
-                  placeholder={selectedSection ? "하위 섹션 이름" : "섹션 이름"}
+                  placeholder={selectedSection ? "하위 폴더 이름" : "폴더 이름"}
                   onChange={(e) => setSectionDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") onAddSection();
@@ -1012,32 +1284,44 @@ export default function App() {
                 <button type="button" onClick={onAddSection}>확인</button>
               </div>
             )}
-            {recent.length === 0 && sections.length === 0 && (
-              <p className="artlib-empty">
-                원본을 올리면 여기에 자동 저장됩니다.<br />
-                섹션으로 정리할 수 있어요.
-              </p>
+            {/* 폴더 트리 — 여기만 스크롤한다(제목·도구는 항상 보이게).
+                빈 곳에 떨어뜨리면 최상위(미분류)로 간다. */}
+            <div className={"artlib-tree" +
+                   (dragOverSec === "" ? " dragover" : "") +
+                   (libDropBusy ? " busy" : "")}
+                 {...dropProps("")}>
+              {recent.length === 0 && sections.length === 0 && (
+                <p className="artlib-empty">
+                  원본을 올리면 여기에 자동 저장됩니다.<br />
+                  파일을 이 영역으로 끌어놓아도 저장돼요.<br />
+                  폴더로 정리할 수 있어요.
+                </p>
+              )}
+              {/* 최상위 폴더부터 재귀 렌더(하위는 renderSection 안에서) */}
+              {sections.filter((s) => !s.parentId ||
+                !sections.some((p) => p.id === s.parentId))
+                .map((s) => renderSection(s, 0))}
+              {/* 미분류 — 폴더가 있으면 항상 표시(드롭으로 되돌릴 수 있게) */}
+              {(() => {
+                const unfiled = recent.filter((a) =>
+                  !a.section || !sections.some((s) => s.id === a.section));
+                if (unfiled.length === 0 && sections.length === 0) return null;
+                return (
+                  <div className="sec-group">
+                    {sections.length > 0 && <div className="sec-head plain">미분류</div>}
+                    {unfiled.map(renderArtwork)}
+                    {unfiled.length === 0 && sections.length > 0 && (
+                      <div className="sec-empty">여기로 드래그하면 분류 해제</div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+            {libDropBusy && (
+              <p className="lib-status"><span className="spin" /> 보관함에 저장 중…</p>
             )}
-            {/* 미분류 — 섹션이 있으면 항상 표시(드롭으로 되돌릴 수 있게) */}
-            {(() => {
-              const unfiled = recent.filter((a) =>
-                !a.section || !sections.some((s) => s.id === a.section));
-              if (unfiled.length === 0 && sections.length === 0) return null;
-              return (
-                <div className={"sec-group" + (dragOverSec === "" ? " dragover" : "")}
-                     {...dropProps("")}>
-                  {sections.length > 0 && <div className="sec-head plain">미분류</div>}
-                  {unfiled.map(renderArtwork)}
-                  {unfiled.length === 0 && sections.length > 0 && (
-                    <div className="sec-empty">여기로 드래그하면 분류 해제</div>
-                  )}
-                </div>
-              );
-            })()}
-            {/* 섹션별 — 최상위만 재귀 렌더(하위는 renderSection 안에서) */}
-            {sections.filter((s) => !s.parentId ||
-              !sections.some((p) => p.id === s.parentId))
-              .map((s) => renderSection(s, 0))}
+            {storageNote && <p className={"lib-storage" +
+              (storageNote.warn ? " warn" : "")}>{storageNote.text}</p>}
           </aside>
           <div className="inspect-main">
             <div className="sets">
@@ -1085,7 +1369,7 @@ export default function App() {
             </div>
             <div className="card runbar">
               <label className="opt">
-                <input type="checkbox" checked={useOcr}
+                <input type="checkbox" checked={useOcr} disabled={running}
                        onChange={(e) => setUseOcr(e.target.checked)} />{" "}
                 OCR 텍스트 대조 사용
               </label>

@@ -285,6 +285,7 @@ export interface FeedbackPayload {
   version: string;
   sentAt: string;
   origin: string;
+  kind?: "error";  // 분석 실패 보고(일반 피드백은 없음)
   items: Record<string, unknown>[];
 }
 
@@ -367,6 +368,155 @@ export function slimPayload(payload: FeedbackPayload): FeedbackPayload {
     items: payload.items.map(({ refImage, testImage, ...rest }) =>
       ({ ...rest, imagesDropped: true })),
   };
+}
+
+// ---------------------------------------------------------- 오류 보고
+// 분석이 실패하면(정합 불가·wasm 예외·메모리 부족 등) 결함 크롭이 없어 일반
+// 피드백을 만들 수 없다. 대신 원인 추적에 필요한 것 — 오류 문구(어느 단계에서
+// 터졌는지 포함), 입력 파일의 이름·크기, 실행 로그 — 만 모아 보낸다.
+// 라벨 이미지 자체는 보내지 않는다(일반 피드백과 동일한 정책).
+export function buildErrorReport(
+  items: ResultItem[], logs: string[], note?: string): FeedbackPayload {
+  const meta = (f?: File) =>
+    f ? { name: f.name, size: f.size, type: f.type } : undefined;
+  return {
+    app: "artwork-compare-web",
+    version: APP_VERSION,
+    sentAt: new Date().toISOString(),
+    origin: location.origin,
+    kind: "error",
+    items: items.map((it) => ({
+      set: it.name,
+      page: it.page,
+      pageCount: it.pageCount,
+      error: it.error,
+      note: note || undefined,
+      refFile: meta(it.refFile),
+      testFile: meta(it.testFile),
+      // 마지막 로그만 — 전체는 너무 길고 앞부분은 매번 같은 부팅 로그다.
+      logs: logs.slice(-60),
+      ua: navigator.userAgent,
+    })),
+  };
+}
+
+// ------------------------------------------------ 수집된 피드백(관리자 화면)
+// 수집기가 돌려주는 1건(= 한 번의 전송)의 모양. 서버가 만든 JSON이라 값이
+// 빠져 있을 수 있어 전부 선택 항목으로 둔다.
+export interface AdminDefectFb {
+  fp?: boolean; ktype?: string; type?: string; cause?: string;
+  comment?: string; bbox?: number[]; refCrop?: string; testCrop?: string;
+}
+export interface AdminMissedFb {
+  x?: number; y?: number; cause?: string; comment?: string;
+  refCrop?: string; testCrop?: string;
+}
+export interface AdminFileMeta { name: string; size: number; type?: string }
+export interface AdminSet {
+  set?: string;
+  feedback?: { defects?: AdminDefectFb[]; missed?: AdminMissedFb[] };
+  // 아래는 분석 실패 보고(kind: "error")에만 있는 항목
+  page?: number;
+  error?: string;
+  note?: string;
+  refFile?: AdminFileMeta;
+  testFile?: AdminFileMeta;
+  logs?: string[];
+  ua?: string;
+}
+export interface AdminEntry {
+  id: string;
+  uploadedAt?: string;
+  received?: string;
+  origin?: string;
+  size?: number;
+  error?: string;  // 수집기가 본문을 읽지 못한 경우
+  data?: { version?: string | number; kind?: string; items?: AdminSet[] };
+}
+
+// 피드백 1건의 날짜 키(YYYY-MM-DD) — 관리자 화면에서 날짜별로 묶는 데 쓴다.
+export function entryDay(e: AdminEntry): string {
+  const t = e.received || e.uploadedAt;
+  const d = t ? new Date(t) : null;
+  if (!d || Number.isNaN(d.getTime())) return "날짜 미상";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+const entryTime = (e: AdminEntry) => {
+  const t = e.received || e.uploadedAt;
+  const d = t ? new Date(t) : null;
+  return d && !Number.isNaN(d.getTime()) ? fmtDateTime(d.getTime()) : "시간 미상";
+};
+
+// 피드백을 대화창에 붙여넣기 좋은 텍스트로. 크롭 이미지는 담지 못하므로
+// 어떤 건인지 되짚을 수 있게 id·세트명·좌표를 같이 적는다.
+export function summarizeFeedbackForChat(entries: AdminEntry[]): string {
+  if (!entries.length) return "";
+  const out: string[] = [
+    `# 인쇄 검수 피드백 ${entries.length}건`,
+    "(오탐 = 검출이 틀렸다는 지적 · 미검출 = 놓친 결함. 크롭 이미지는 관리자 화면에서 id로 찾을 수 있음)",
+    "",
+  ];
+  for (const e of entries) {
+    const isErr = e.data?.kind === "error";
+    out.push(`## [${e.id}] ${entryTime(e)}${isErr ? " — 분석 실패 보고" : ""}`);
+    if (e.error) { out.push(`- 본문을 읽지 못함: ${e.error}`, ""); continue; }
+    for (const s of e.data?.items ?? []) {
+      out.push(`### 세트 "${s.set || "이름 없음"}"` +
+               (s.page ? ` · 페이지 ${s.page}` : ""));
+      if (isErr || s.error) {
+        out.push(`- 오류: ${s.error || "문구 없음"}`);
+        if (s.note) out.push(`- 사용자 메모: "${s.note.replace(/\s+/g, " ").trim()}"`);
+        if (s.refFile) out.push(`- 원본: ${s.refFile.name} (${fmtMB(s.refFile.size)})`);
+        if (s.testFile) out.push(`- 인쇄물: ${s.testFile.name} (${fmtMB(s.testFile.size)})`);
+        if (s.logs?.length)
+          out.push("- 마지막 로그:", "```", ...s.logs.slice(-15), "```");
+        continue;
+      }
+      for (const d of s.feedback?.defects ?? []) {
+        const bits = [d.fp ? "오탐" : "정탐", d.ktype || d.type || "결함"];
+        if (d.cause) bits.push(`원인: ${d.cause}`);
+        if (d.bbox?.length === 4) bits.push(`bbox_ref=[${d.bbox.join(",")}]`);
+        if (d.comment) bits.push(`"${d.comment.replace(/\s+/g, " ").trim()}"`);
+        out.push(`- ${bits.join(" | ")}`);
+      }
+      for (const m of s.feedback?.missed ?? []) {
+        const bits = ["미검출"];
+        if (m.cause) bits.push(`원인: ${m.cause}`);
+        if (m.x != null && m.y != null)
+          bits.push(`위치=(${Math.round(m.x)},${Math.round(m.y)})`);
+        if (m.comment) bits.push(`"${m.comment.replace(/\s+/g, " ").trim()}"`);
+        out.push(`- ${bits.join(" | ")}`);
+      }
+      if (!(s.feedback?.defects ?? []).length && !(s.feedback?.missed ?? []).length)
+        out.push("- (내용 없음)");
+    }
+    out.push("");
+  }
+  return out.join("\n");
+}
+
+// 클립보드 복사. navigator.clipboard는 보안 컨텍스트(HTTPS/localhost)에서만
+// 동작해서, 사내망 http:// 접속을 위해 execCommand 폴백을 둔다.
+export async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* 폴백으로 */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch { return false; }
 }
 
 // ---------------------------------------------------------------- 결과 보존

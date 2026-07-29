@@ -393,6 +393,21 @@ button.rm:disabled { opacity: 0.4; cursor: default; }
   border-top: 1px solid var(--line);
 }
 .fbsend .go.save { padding: 5px 14px; font-size: 0.8rem; }
+/* 분석 실패 페이지 — 오류 문구 + 그 자리에서 보내는 오류 보고 */
+.errbox { border-top: 1px solid var(--line); padding: 8px 12px; }
+.errmsg {
+  margin: 0 0 6px; font-size: 0.78rem; line-height: 1.45; color: #a33;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.errsend { font-size: 0.78rem; }
+.errnote {
+  width: 100%; box-sizing: border-box; min-height: 52px; resize: vertical;
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
+  font: inherit; font-size: 0.8rem;
+}
+.errbox .fbsend { border-top: 0; padding: 8px 0 0; }
+.errhint { margin: 4px 0 0; font-size: 0.72rem; }
 .badge {
   flex: none;
   font-weight: 700;
@@ -539,8 +554,25 @@ details summary { cursor: pointer; }
 @media (max-width: 900px) {
   .inspect { grid-template-columns: 1fr; }
 }
-.artlib { position: sticky; top: 64px; max-height: calc(100vh - 90px); overflow-y: auto; }
+/* 제목·도구는 고정하고 폴더 트리만 스크롤한다 — 폴더가 수십 개가 돼도
+   백업 버튼과 ＋폴더가 화면 밖으로 밀려나지 않는다. */
+.artlib {
+  position: sticky; top: 64px; max-height: calc(100vh - 90px);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.artlib-tree {
+  flex: 1 1 auto; min-height: 80px; overflow-y: auto; overscroll-behavior: contain;
+  margin: 0 -4px; padding: 2px 4px; border-radius: 8px;
+}
+.artlib-tree.dragover { background: #fff6f5; outline: 2px dashed var(--red); }
+.artlib-tree.busy { opacity: 0.6; }
+.lib-storage {
+  flex: none; margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--line);
+  font-size: 0.72rem; color: var(--muted);
+}
+.lib-storage.warn { color: #b26a00; font-weight: 600; }
 .artlib-title {
+  flex: none;
   font-weight: 800; margin-bottom: 8px;
   display: flex; align-items: center; justify-content: space-between;
 }
@@ -571,11 +603,15 @@ details summary { cursor: pointer; }
   border: 1px solid var(--line); border-radius: 6px; }
 .sec-edit button { border: 0; background: var(--red); color: #fff;
   border-radius: 6px; padding: 4px 8px; font-size: 0.78rem; cursor: pointer; }
-.sec-group { margin-bottom: 10px; }
+/* 폴더 목록은 촘촘하게 — 폴더가 많아도 한 화면에 최대한 들어오게 한다 */
+.sec-group { margin-bottom: 2px; }
 .sec-head {
-  display: flex; align-items: center; gap: 4px; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 3px; margin-bottom: 1px;
+  padding: 1px 2px;
   font-size: 0.8rem; font-weight: 700; color: #555;
 }
+.sec-head[draggable="true"] { cursor: grab; }
+.sec-group.dragging > .sec-head { opacity: 0.45; }
 .sec-head.plain { color: var(--muted); font-weight: 600; padding-left: 4px; }
 /* 선택(눌린) 섹션 — 여기에 하위 섹션이 추가된다 */
 .sec-head.selected { background: #fff1f0; border-radius: 6px;
@@ -598,12 +634,12 @@ details summary { cursor: pointer; }
 .sec-count { color: #aaa; font-weight: 400; font-size: 0.72rem; }
 .sec-head input { flex: 1; min-width: 0; padding: 3px 6px; font-size: 0.8rem;
   border: 1px solid var(--line); border-radius: 6px; }
-.sec-empty { color: #bbb; font-size: 0.74rem; padding: 2px 6px 6px; }
+.sec-empty { color: #bbb; font-size: 0.74rem; padding: 1px 6px 3px; }
 .artlib-empty { color: var(--muted); font-size: 0.8rem; line-height: 1.5; }
-/* 섹션 그룹은 드롭 대상 — 아트웍을 끌어와 분류 */
-.sec-group { border-radius: 8px; padding: 2px; }
+/* 폴더 그룹은 드롭 대상 — 원본·폴더·바깥 파일을 끌어와 정리 */
+.sec-group { border-radius: 8px; padding: 1px; }
 .sec-group.dragover { background: #fff1f0; outline: 2px dashed var(--red); }
-.artitem-row { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.artitem-row { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
 .artitem-row .artitem { flex: 1; min-width: 0; margin-bottom: 0; }
 .artitem-row[draggable="true"] { cursor: grab; }
 .art-grip { flex: none; color: #ccc; cursor: grab; font-size: 0.85rem; user-select: none; }
@@ -622,9 +658,9 @@ details summary { cursor: pointer; }
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 7px 10px;
-  margin-bottom: 6px;
-  font-size: 0.83rem;
+  padding: 4px 8px;
+  margin-bottom: 2px;
+  font-size: 0.8rem;
   cursor: pointer;
 }
 .artitem:hover { border-color: var(--red); color: var(--red); }
@@ -632,6 +668,21 @@ details summary { cursor: pointer; }
 .artname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artsize { flex: none; color: #aaa; font-size: 0.74rem; }
 .inspect-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* ---- 검수 중 잠금 ----
+   분석이 도는 동안 검수 페이지의 조작은 전부 막혀 있다(각 요소가 disabled).
+   커서까지 '클릭 불가'로 바꿔서, 눌러보기 전에 잠긴 상태임을 알 수 있게 한다.
+   진행 상황을 읽는 데 필요한 로그 펼치기만 예외로 둔다. */
+.shell.locked button,
+.shell.locked a,
+.shell.locked input,
+.shell.locked label,
+.shell.locked [role="button"],
+.shell.locked .drop,
+.shell.locked .sec-name,
+.shell.locked .art-grip,
+.shell.locked .artitem-row { cursor: not-allowed; }
+.shell.locked summary { cursor: pointer; }
 
 /* ---- 관리자(피드백 조회) ---- */
 .gnb-admin {
@@ -693,3 +744,61 @@ details summary { cursor: pointer; }
   border-radius: 6px; image-rendering: pixelated;
 }
 .admin-empty-set { color: #aaa; font-size: 0.8rem; }
+
+/* ---- 피드백 관리: 날짜 그룹 · 확인 스위치 · 삭제 ---- */
+.admin-msg {
+  margin: 0; padding: 8px 12px; border-radius: 8px;
+  background: #f1f5ff; color: #2b3a67; font-size: 0.85rem;
+}
+.admin-filter {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.85rem; color: #555; cursor: pointer;
+}
+.admin-new {
+  margin-left: 8px; background: var(--red); color: #fff;
+  border-radius: 999px; padding: 1px 8px; font-size: 0.72rem; font-weight: 800;
+}
+.admin-day { display: flex; flex-direction: column; gap: 10px; }
+.admin-day-head { display: flex; align-items: center; gap: 8px; }
+.admin-day-toggle {
+  display: flex; align-items: center; gap: 6px;
+  border: 0; background: none; cursor: pointer;
+  font-size: 1rem; font-weight: 800; color: var(--fg); padding: 0;
+}
+.admin-day-toggle:hover { color: var(--red); }
+/* 확인 처리된 건은 흐리게 — 남은 미확인이 눈에 띄게 */
+.admin-entry.read { opacity: 0.55; }
+.admin-entry.read:hover { opacity: 1; }
+.admin-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem; color: #999; background: #f4f5f7;
+  border-radius: 5px; padding: 1px 5px;
+}
+.admin-switch {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line); background: #fff; border-radius: 999px;
+  padding: 2px 9px 2px 4px; cursor: pointer; font-size: 0.72rem;
+  font-weight: 700; color: var(--muted);
+}
+.admin-switch-knob {
+  width: 9px; height: 9px; border-radius: 50%; background: #ccc;
+}
+.admin-switch.on { border-color: #78be20; color: #4d7d13; }
+.admin-switch.on .admin-switch-knob { background: #78be20; }
+.admin-del {
+  border: 0; background: none; color: #ccc; cursor: pointer;
+  font-size: 0.9rem; padding: 2px 4px; line-height: 1;
+}
+.admin-del:hover { color: var(--red); }
+.admin-confirm { display: inline-flex; gap: 6px; }
+/* 분석 실패 보고 */
+.admin-tag.err { background: #a33; }
+.admin-errreport { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.admin-errmsg {
+  font-size: 0.85rem; color: #a33; background: #fff6f5;
+  border-radius: 6px; padding: 6px 8px; white-space: pre-wrap;
+}
+.admin-files { display: flex; gap: 12px; flex-wrap: wrap;
+  font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+.admin-ua { font-size: 0.7rem; color: #bbb; margin-top: 2px; word-break: break-all; }
+.rm.danger { border-color: var(--red); color: #fff; background: var(--red); }

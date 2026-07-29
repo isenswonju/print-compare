@@ -31,10 +31,35 @@ cvReady.then(() =>
   ctx.postMessage({ type: "log", msg: "[워커] OpenCV 초기화 완료" }));
 
 let pendingOcr: ((words: OcrWords | null) => void) | null = null;
+// 마지막으로 지나간 단계 — OpenCV(wasm) 예외는 메시지 없이 숫자 포인터로만
+// 튀어나오는 경우가 있어("120" 같은 값), 어디서 터졌는지를 함께 알려준다.
+let lastStage = "시작";
+
+// wasm에서 올라온 예외를 사람이 읽을 수 있는 문장으로.
+function describeError(err: unknown): string {
+  const cv = ctx.cv as unknown as
+    { exceptionFromPtr?: (p: number) => { msg?: string; err?: string } };
+  // 1) 예외 포인터(숫자) — 빌드가 지원하면 실제 메시지를 꺼낸다.
+  if (typeof err === "number") {
+    try {
+      const ex = cv?.exceptionFromPtr?.(err);
+      const detail = ex?.msg || ex?.err;
+      if (detail) return `OpenCV 오류(${err}) — ${detail} [단계: ${lastStage}]`;
+    } catch { /* 아래 일반 문구로 */ }
+    return `OpenCV 내부 오류(코드 ${err}) — 단계: ${lastStage}. ` +
+           `이미지가 너무 크거나 손상됐을 때 주로 발생합니다.`;
+  }
+  // 2) 메모리 부족(대형 라벨에서 흔함)은 따로 짚어준다.
+  const msg = String((err as Error)?.message || err);
+  if (/out of memory|Cannot enlarge|allocat/i.test(msg))
+    return `메모리 부족으로 분석을 마치지 못했습니다 [단계: ${lastStage}] — ${msg}`;
+  return `${msg} [단계: ${lastStage}]`;
+}
 
 ctx.onmessage = async (e: MessageEvent) => {
   const msg = e.data;
   if (msg.type === "run") {
+    lastStage = "OpenCV 초기화";
     try {
       const { cv } = await cvReady;
       const result = await runPipeline(
@@ -44,7 +69,10 @@ ctx.onmessage = async (e: MessageEvent) => {
         msg.cfg,
         {
           log: (m) => ctx.postMessage({ type: "log", msg: m }),
-          progress: (s) => ctx.postMessage({ type: "progress", stage: s }),
+          progress: (s) => {
+            lastStage = s;
+            ctx.postMessage({ type: "progress", stage: s });
+          },
           onAligned: (rgba, w, h) =>
             new Promise((resolve) => {
               pendingOcr = resolve;
@@ -55,8 +83,8 @@ ctx.onmessage = async (e: MessageEvent) => {
       );
       ctx.postMessage({ type: "done", result });
     } catch (err) {
-      ctx.postMessage({ type: "error",
-                        msg: String((err as Error)?.message || err) });
+      ctx.postMessage({ type: "error", msg: describeError(err),
+                        stage: lastStage });
     }
   } else if (msg.type === "ocr") {
     // msg.words: {refWords, testWords} | null (OCR 끔/실패)

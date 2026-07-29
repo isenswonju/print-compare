@@ -11,6 +11,9 @@
 구성 요소:
 - `web/` — 브라우저판 (React+TS, opencv.js/tesseract.js). 재배포:
   `cd web && npm run build` 후 huggingface_hub `upload_folder(dist)`.
+  원본 보관함은 IndexedDB에 두고 공용 서버(`inkspect-feedback`의 `/api/library`)와
+  파일 단위로 증분 동기화한다. 규모 한계는 `npm run bench:library`로 실측
+  (자세한 값은 `docs/원본보관함-영구저장-계획.md` §4-2).
 - `compare_artwork.py` — 기준 Python 엔진(CLI). 브라우저판 정확도 검증
   (`web/tools/harness.cjs`)과 오탐 튜닝의 기준으로 유지.
 - `webapp.py` — 경량 지원 서버: `/app/` 정적 서빙 + `/feedback` 피드백 수집

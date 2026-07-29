@@ -47,6 +47,45 @@ function opFailIDB(): Any {
   };
 }
 
+// 목록 조회(커서)는 되지만 쓰기 트랜잭션이 실패하는 IDB — moveSection이
+// 순환 검사를 통과한 뒤 put에서 깨지는 경로(마지막 방어)를 확인하려고 쓴다.
+function writeFailIDB(sections: Any[]): Any {
+  const store: Any = {
+    put: () => ({ onsuccess: null, onerror: null }),
+    openCursor() {
+      const r: Any = { onsuccess: null, onerror: null, result: null };
+      let i = 0;
+      const step = () => {
+        r.result = i < sections.length
+          ? { key: sections[i].id, value: sections[i],
+              continue: () => { i++; queueMicrotask(step); } }
+          : null;
+        r.onsuccess && r.onsuccess();
+      };
+      queueMicrotask(step);
+      return r;
+    },
+  };
+  const db: Any = {
+    objectStoreNames: { contains: () => true },
+    transaction(_name: string, mode?: string) {
+      const t: Any = { objectStore: () => store, oncomplete: null,
+                       onerror: null, error: new Error("write fail") };
+      // 읽기는 커서 콜백으로 끝나고, 쓰기만 트랜잭션 실패로 떨어뜨린다.
+      if (mode === "readwrite") queueMicrotask(() => t.onerror && t.onerror());
+      return t;
+    },
+  };
+  return {
+    open() {
+      const req: Any = { result: db, onsuccess: null, onerror: null,
+        onupgradeneeded: null };
+      queueMicrotask(() => req.onsuccess && req.onsuccess());
+      return req;
+    },
+  };
+}
+
 const file = (n: string) => new File(["x"], n, { type: "image/png" });
 
 // 두 실패 IDB 모두에서 "throw 없이 폴백"을 확인하는 공통 검증.
@@ -67,9 +106,13 @@ async function expectAllFallbacks() {
   await m.putRefWords("h", []);
   await m.saveSession([{ name: "x" }]);
   await m.clearSession();
-  // 백업/복원도 안전하게 폴백
-  const backup = await m.exportLibrary();
-  expect(Array.isArray(backup.artworks)).toBe(true);
+  // 동기화 계층도 안전하게 폴백
+  expect(await m.moveSection("a", "b")).toBe(false);   // catch/목록 없음 → false
+  expect(await m.listArtworkHashes()).toEqual(new Set()); // catch → 빈 집합
+  expect(await m.getArtworkBlob("h")).toBeNull();      // catch → null
+  await m.putSections([{ id: "s", name: "n", createdAt: 1 }]);
+  const manifest = await m.exportManifest();
+  expect(manifest.artworks).toEqual([]);
   const r = await m.importLibrary({ version: 1, exportedAt: 1, sections: [],
     artworks: [{ hash: "z", name: "z.png", size: 1, type: "image/png",
       dataB64: btoa("z") }] });
@@ -88,6 +131,38 @@ describe("cache — IndexedDB 실패 방어", () => {
   it("트랜잭션/커서 실패: onerror 경로로도 폴백(throw 없음)", async () => {
     vi.stubGlobal("indexedDB", opFailIDB());
     await expectAllFallbacks();
+  });
+
+  it("listArtworkHashes: 키 조회가 값을 안 주면 빈 집합", async () => {
+    // tx()는 요청 result가 undefined면 undefined를 돌려준다 — 그 폴백 경로.
+    const db: Any = {
+      objectStoreNames: { contains: () => true },
+      transaction() {
+        const store: Any = { getAllKeys: () =>
+          ({ onsuccess: null, onerror: null, result: undefined }) };
+        const t: Any = { objectStore: () => store, oncomplete: null, onerror: null };
+        queueMicrotask(() => t.oncomplete && t.oncomplete());
+        return t;
+      },
+    };
+    vi.stubGlobal("indexedDB", {
+      open() {
+        const req: Any = { result: db, onsuccess: null, onerror: null,
+          onupgradeneeded: null };
+        queueMicrotask(() => req.onsuccess && req.onsuccess());
+        return req;
+      },
+    });
+    const m = await import("./cache.ts");
+    expect(await m.listArtworkHashes()).toEqual(new Set());
+  });
+
+  it("moveSection: 순환 검사를 통과해도 쓰기가 깨지면 false", async () => {
+    vi.stubGlobal("indexedDB", writeFailIDB([
+      { id: "a", name: "A", createdAt: 1 },
+      { id: "b", name: "B", createdAt: 2 }]));
+    const m = await import("./cache.ts");
+    expect(await m.moveSection("b", "a")).toBe(false);
   });
 
   it("getArtworkFile: 배경 lastUsed 갱신이 실패해도 파일은 반환(catch 무시)", async () => {

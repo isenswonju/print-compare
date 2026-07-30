@@ -7,11 +7,12 @@
     "test": "tests/fixtures/PGA1E0398_TEST.png"
   },
   "fp_budget": 5,
-  "note": "실물 회귀 픽스처. 라벨 출처는 지시서 §5 표(#2·#5는 실측 교정) — tests/test_fixture.py 와 동일한 계약. min_area 60→40 결정에 쓰였으므로 tune 셋",
+  "note": "실물 회귀 픽스처. 라벨 출처는 지시서 §5 표(#2·#5는 실측 교정) — tests/test_fixture.py 와 동일한 계약. min_area 60→40 결정에 쓰였으므로 tune 셋. 기준선 오탐이 python 1건 / web 2건인 이유: web(tesseract.js)만 'Owner's'를 's'로 오독해 text_mismatch를 하나 더 낸다(2026-07-30 실측, 미해결)",
   "must_find": [
     { "id": "1", "types": ["extra"], "bbox": [1520, 670, 200, 170], "note": "잉크 스팟" },
-    { "id": "2", "types": ["extra"], "bbox": [4900, 700, 100, 60], "critical": true,
-      "note": "REV 행 '2025-04'의 0 메워짐 (실측 교정 좌표)" },
+    { "id": "2", "types": ["extra", "text_mismatch"], "bbox": [4900, 700, 100, 60],
+      "critical": true,
+      "note": "REV 행 '2025-04'의 0 메워짐 (실측 교정 좌표). web 엔진은 OCR로도 잡는다('2025-84') — 두 경로 모두 정탐이므로 유형을 둘 다 적는다" },
     { "id": "3", "types": ["extra"], "bbox": [4850, 1215, 130, 140], "note": "잉크 스팟" },
     { "id": "4", "types": ["extra", "text_mismatch"], "bbox": [3390, 2635, 130, 130], "note": "" },
     { "id": "5", "types": ["extra"], "bbox": [1700, 2960, 40, 40],

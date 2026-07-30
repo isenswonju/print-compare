@@ -55,9 +55,24 @@ def test_must_find_miss_is_failure():
 def test_type_must_match_when_specified():
     case = labeled(must_find=[{"id": "d1", "types": ["showthrough"],
                                "bbox": [1000, 1000, 50, 50]}],
-                   fp_budget=1)
+                   fp_budget=0)
     sc = score(case, [finding(1, "extra", (1000, 1000, 50, 50))], REF_W)
     assert sc.missed == ["d1"], "유형이 다른 검출로 라벨을 만족시켜선 안 된다"
+    assert len(sc.fps) == 1, "유형이 어긋난 검출은 오탐으로 센다(잘못된 분류)"
+
+
+def test_one_defect_two_paths_needs_both_types_on_the_label():
+    """한 결함이 diff·OCR 두 경로로 잡히면 라벨에 유형을 둘 다 적는다.
+
+    실측: web 엔진은 REV 행의 메워진 0을 OCR로도 잡는다('2025-04'→'2025-84').
+    라벨이 extra 하나면 그 검출이 오탐으로 세어져, 정탐을 오탐으로 기록한다.
+    """
+    both = labeled(must_find=[{"id": "d2", "types": ["extra", "text_mismatch"],
+                               "bbox": [4900, 700, 100, 60], "critical": True}])
+    sc = score(both, [finding(1, "extra", (4930, 710, 20, 20), "critical"),
+                      finding(2, "text_mismatch", (4819, 709, 167, 41),
+                              "critical")], REF_W)
+    assert sc.ok and not sc.fps and len(sc.hits) == 1
 
 
 def test_tolerance_scales_with_resolution():

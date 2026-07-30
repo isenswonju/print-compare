@@ -235,9 +235,9 @@ python tools/ocr_rules_eval.py REF TEST   # OCR 오탐 억제 규칙 후보 비�
 엔진을 고칠 때마다 **잘 되던 케이스가 죽는지** 자동으로 확인한다.
 
 ```bash
-python -m bench.run                  # 전 케이스(약 7분) — 종료코드 0=PASS, 1=FAIL
-python -m bench.run --fast           # OCR 끄고 빠르게(커밋마다)
-python -m bench.run --group guard     # 홀드아웃만
+python -m bench.run                  # 전 케이스(30건, 6.5분) — 종료코드 0=PASS, 1=FAIL
+python -m bench.run --fast --group guard   # 오탐 감시만 OCR 끄고(7건, 30초 — 커밋마다)
+python -m bench.run --group guard     # 홀드아웃만(OCR 포함)
 python -m bench.run --only pga1e0398 --keep out/  # 한 건 + 산출물 보기
 python -m bench.run --engine web      # 사용자가 쓰는 브라우저 엔진(TS)으로
 python -m bench.run --accept          # 결과를 확인한 뒤 기준선으로 승인
@@ -318,6 +318,18 @@ inject-erase_line  면적 4044 / 최소 40px → 101×    ← 안전
   결국 엔진을 다시 돌려보게 만든다.
 - `bench/history.jsonl` — 케이스 × 커밋 × 지표(검출·오탐·마진·시간) 시계열.
   "언제부터 나빠졌나"를 커밋에 붙여 되짚을 수 있다.
+
+### 두 엔진 대조
+
+같은 케이스를 `--engine python`(기준 구현)과 `--engine web`(사용자가 쓰는 엔진)으로
+돌려 기준선을 따로 갖는다. 두 엔진의 차이 자체도 신호다 — 실측(pga1e0398):
+검출 9/9 동일, 마진 오차 5% 이내, 오탐은 python 1건 / web 2건
+(web만 tesseract.js가 `Owner's`를 `s`로 오독해 `text_mismatch`를 하나 더 낸다 —
+2026-07-30 미해결, 케이스 note에 기록).
+
+한 결함이 diff·OCR 두 경로로 잡히면 **라벨에 유형을 둘 다 적는다**
+(`"types": ["extra", "text_mismatch"]`). 한쪽만 적으면 다른 경로의 정탐이 오탐으로
+집계된다 — 실제로 REV 행 결함에서 그랬다.
 
 ### 안전망이 실제로 잡은 것 (2026-07-30, 도입 첫 실행)
 

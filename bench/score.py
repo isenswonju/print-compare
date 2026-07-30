@@ -92,6 +92,11 @@ def score(case: Case, findings: list[dict], ref_w: int) -> CaseScore:
     defects = [f for f in findings if is_defect(f)]
     sc.defects_total = len(defects)
     waived = case.waived_ids
+    # 오탐 = 라벨의 (유형, 위치)에 맞지 않는 검출. 위치만 겹치면 봐주는 규칙도
+    # 생각했지만, showthrough처럼 큰 라벨(2157×606)이 그 안의 엉뚱한 OCR 오탐까지
+    # 삼켜 신호가 사라졌다(실측). 유형까지 맞아야 한다는 tests/test_fixture.py의
+    # 기존 관행을 따른다 — 한 결함이 두 경로로 잡히는 것은 라벨에 유형을 여럿
+    # 적어서 표현한다(예: ["extra", "text_mismatch"]).
     claimed: set[int] = set()
 
     for label in case.must_find:

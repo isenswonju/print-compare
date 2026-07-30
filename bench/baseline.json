@@ -791,12 +791,12 @@
       "unlabeled": []
     },
     "python/pga1e0398": {
-      "accepted_at": "2026-07-30T19:33:45+09:00",
+      "accepted_at": "2026-07-30T19:39:42+09:00",
       "defects_total": 12,
       "elapsed_s": 14.1,
       "findings_total": 24,
       "fingerprint": {
-        "commit": "f641dcf",
+        "commit": "4d0d470",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -892,12 +892,12 @@
       "unlabeled": []
     },
     "web/pga1e0398": {
-      "accepted_at": "2026-07-30T19:24:58+09:00",
+      "accepted_at": "2026-07-30T19:42:12+09:00",
       "defects_total": 15,
-      "elapsed_s": 50.0,
+      "elapsed_s": 49.8,
       "findings_total": 27,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "4d0d470",
         "config_hash": "17f2a582a8dc",
         "dirty": true,
         "engine": "web",
@@ -908,7 +908,7 @@
           "tesseract.js": "^5.1.1"
         }
       },
-      "fp_count": 3,
+      "fp_count": 2,
       "margins": {
         "1": 10.075,
         "2": 4.65,
@@ -925,20 +925,6 @@
         9
       ],
       "unlabeled": [
-        {
-          "area_px": 6847,
-          "bbox": [
-            4819,
-            709,
-            167,
-            41
-          ],
-          "id": 1,
-          "margin": null,
-          "note": "OCR 불일치: '2025-04' → '2025-84'",
-          "severity": "critical",
-          "type": "text_mismatch"
-        },
         {
           "area_px": 99,
           "bbox": [

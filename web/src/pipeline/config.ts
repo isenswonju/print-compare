@@ -4,7 +4,9 @@ export const REF_BASE_WIDTH = 5564;
 export const defaultConfig = {
   tol: 5,
   tolFallback: 13,
-  minArea: 60,
+  // 60→40: 미검출 가혹 테스트에서 50px급 결함(여백 잉크 스팟 r=4)을 놓쳤고,
+  // 40에서는 회귀 픽스처 오탐이 늘지 않았다(2건 유지, 정답 9/9).
+  minArea: 40,
   useOcr: true,
   useTileRefine: true,
 
@@ -42,6 +44,14 @@ export const defaultConfig = {
   reflowMinCorr: 0.85,
   reflowExclude: 12,
   reflowMinCover: 0.6,
+
+  // 인쇄 농도 검사(3.4b) — 옅게 인쇄된 결함. 판정은 페이지 중앙값 대비
+  // 상대값이라 전체적으로 옅은 인쇄는 통과하고 국소적으로 흐린 글자만 걸린다.
+  coverMinArea: 120,   // 검사 대상 REF 잉크 덩어리 최소 면적(REF 폭 5564 기준)
+  coverMerge: 3,       // 붙은 획만 잇는 최소 팽창(글자 단위 유지)
+  coverPad: 3,         // TEST를 훑는 여유(px) — 잔여 정합 오차 흡수
+  fadeRel: 0.70,       // 농도비가 페이지 중앙값의 이 배수 미만이면 옅은 인쇄
+  fadeAbs: 0.80,       // 동시에 이 절대값 미만일 때만(전체가 옅은 경우 방어)
 
   // 뒷비침
   ghostLo: 150,

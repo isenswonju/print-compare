@@ -25,7 +25,13 @@
 양쪽 동일 계약). REF/TEST 중 한쪽만 PDF여도 된다.
 
 검출 대상: 잉크 스팟, 글자 뭉개짐/메워짐(C→O 등), 잉여 점·대시,
-뒷비침(show-through), 누락 잉크.
+뒷비침(show-through), 누락 잉크, **인쇄 농도 부족(옅게 인쇄됨)**.
+
+검출 한계(실측): 잉크 면적 40px 미만, 그리고 글자 안쪽의 폭 4px 이하 결손
+(획 끊김·마침표 크기 삭제)은 잡지 못한다. 후자는 잔여 정합 오차(2~3px)를
+흡수하려면 주변을 훑어야 하고 그러면 결손이 이웃 잉크에 덮이는 구조적 한계다
+(허용치를 낮추면 검출이 3~10배로 폭증해 쓸 수 없다). 자세한 측정은
+`python tools/recall_stress.py`.
 결함으로 보고하지 않는 것: 재단선/레지스터 마크 부재, 스캔 스큐,
 회색 박스 망점 톤 차이.
 
@@ -106,7 +112,7 @@ stdout에 요약 테이블(번호/유형/심각도/bbox/비고)이 출력된다.
 ```json
 [{
   "id": 1,
-  "type": "extra | missing | showthrough | text_mismatch | trim_mark_expected | layout_reflow",
+  "type": "extra | missing | faded | showthrough | text_mismatch | trim_mark_expected | layout_reflow",
   "severity": "critical | major | minor | expected",
   "bbox_ref": [x, y, w, h],
   "area_px": 123,
@@ -141,20 +147,29 @@ stdout에 요약 테이블(번호/유형/심각도/bbox/비고)이 출력된다.
    상대 잉크로 덮이는 경우에만 줄 밀림으로 판정해 억제. 억제된 영역은
    `layout_reflow`(expected) 1건으로 합산 보고되며, 밀림을 유발한 문구
    변경 자체는 OCR 경로가 `text_mismatch`로 잡는다.
+5c. **인쇄 농도**(3.4b) — 픽셀 diff는 잉크 마스크가 이진이라 "회색으로 인쇄된
+   글자"도 잉크로 잡아 diff가 0이다(실측: 9000px 크기의 옅은 단어를 0건 검출).
+   REF 잉크 덩어리(글자)마다 REF/TEST의 잉크 진하기를 같은 픽셀 집합에서 재고,
+   **페이지 중앙값 대비** 유독 옅은 덩어리만 `faded`로 보고한다. 상대 판정이라
+   전체적인 인쇄 질감 저하는 통과한다(실측: 전체 블러+노이즈+톤 저하를 먹여도
+   중앙값 1.13→1.11, 국소 결함은 0.49로 분리).
 6. **뒷비침** — medianBlur(7) 후 151~214 밴드 ∧ REF 백색(>215, erode 9).
    리플로우로 밀린 본문이 고스트로 오탐되는 것을 막기 위해 5b와 동일
    매칭 + 억제 영역 겹침(>10%) 검사를 적용.
 7. **OCR 안전망** — tesseract(eng, psm 3)로 REF/정합 TEST 단어 시퀀스를
    SequenceMatcher 정렬, 불일치를 `text_mismatch`(CRITICAL)로 보고.
 8. **심각도** — CRITICAL: text_mismatch 또는 REV 행 교차 /
-   MAJOR: 글자·괘선 박스 교차, showthrough / MINOR: 여백 고립 반점.
+   MAJOR: 글자·괘선 박스 교차, showthrough, faded / MINOR: 여백 고립 반점.
 
 ## 파라미터 튜닝 가이드
 
 | 파라미터 | 기본값 | 언제 조정하나 |
 |---|---|---|
 | `--tol` | 5 | 타일 정합 후에도 잔차가 큰 저품질 스캔이면 7~9로. 키울수록 획 부착 결함이 숨는다. |
-| `--min-area` | 60 | 더 작은 반점까지 잡으려면 낮춘다(오탐 증가). 기준 해상도(폭 5564px) 값이며 자동 스케일된다. |
+| `--min-area` | 40 | 더 작은 반점까지 잡으려면 낮춘다(오탐 증가). 기준 해상도(폭 5564px) 값이며 자동 스케일된다. 60→40은 미검출 가혹 테스트 근거(50px 결함 확보, 픽스처 오탐 증가 0). |
+| `Config.fade_rel` | 0.70 | 옅은 인쇄 판정 — 잉크 농도비가 페이지 중앙값의 이 배수 미만이면 보고. 상대 판정이라 전체적인 질감 저하는 통과한다. 올리면 민감해진다. |
+| `Config.fade_abs` | 0.80 | 위 조건과 함께 충족해야 하는 절대 상한(전체가 옅은 경우 방어). |
+| `Config.cover_min_area` | 120 | 농도 검사 대상 글자 덩어리 최소 면적. 낮추면 잔글씨까지 보지만 오탐이 는다. |
 | `--no-tile-refine` | off | 폴백 모드. 타일 정합을 생략하고 tol=13을 쓴다. 잔차 흡수를 위해 팽창이 커져 **획 부착 결함을 놓친다** — 디버깅 용도로만. |
 | `--no-ocr` | off | tesseract 미설치 환경, 또는 속도 우선일 때. C→O류 훼손의 이중 검출망이 꺼진다. |
 | `Config.extra_max_norm` | 190 | extra 후보의 diff 픽셀 평균 밝기 상한. 실측: 진성 결함 ≤174, 망점/고스트 오탐 ≥206. 흐린 잉크 결함이 걸러지면 올린다. |
@@ -191,6 +206,14 @@ blockSize 41/C 18 등)는 실측 검증값이므로 유지를 권장.
 
 ```bash
 python -m pytest tests/ -v
+```
+
+정확도 도구 (피드백 기반 튜닝용):
+
+```bash
+python tools/recall_stress.py        # 미검출 가혹 테스트 — 결함을 심어 놓치는지
+python tools/min_area_sweep.py       # 임계값 트레이드오프 표(검출 vs 오탐)
+python tools/ocr_rules_eval.py REF TEST   # OCR 오탐 억제 규칙 후보 비교
 ```
 
 `tests/fixtures/`의 PGA1E0398 REF/TEST 쌍으로 9건 결함 검출 + FP ≤ 5 +

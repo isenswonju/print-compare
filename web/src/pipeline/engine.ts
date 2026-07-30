@@ -224,6 +224,27 @@ export async function runPipeline(
       findings.push({ type: "missing", bbox: c.bbox, area: c.area, note: "" });
   }
 
+  // 3.4b 인쇄 농도 — 픽셀 diff가 원리적으로 못 잡는 '옅게 인쇄됨'.
+  // 이미 보고된 결함·리플로우 영역과 겹치면 중복이라 뺀다.
+  ts = now();
+  progress("인쇄 농도 검사");
+  {
+    const reported = [...findings.map((f) => f.bbox), ...reflowBoxes];
+    let nFaded = 0;
+    for (const c of fadedComponents(cv, refInk, testInk, ref, normTest, cfg,
+                                    cbox, ellipse)) {
+      if (reported.some((b) => boxesIntersect(c.bbox, b))) continue;
+      if (inMargin(c.bbox, ref, cfg.marginRatio)) continue;
+      const pct = (c as Comp & { darkPct?: number }).darkPct ?? 0;
+      findings.push({ type: "faded", bbox: c.bbox, area: c.area,
+                      note: `인쇄 농도 부족 — 잉크 진하기가 이 페이지 평균의 ` +
+                            `${pct}% 수준(옅게 인쇄됨)` });
+      nFaded++;
+    }
+    if (nFaded) log(`[농도] 옅은 인쇄 ${nFaded}건`);
+  }
+  mark("농도", ts);
+
   // ---------------------------------------------------------------- 3.6 뒷비침
   ts = now();
   progress("뒷비침 검출");
@@ -434,6 +455,91 @@ function globalAlign(cv: CV, ref: Mat, test: Mat, cfg: PipelineConfig,
   if (refOwned) refS.delete();
   if (testOwned) testS.delete();
   return aligned;
+}
+
+// --------------------------------------------------------------------------
+// 3.4b 인쇄 농도 검사 — 옅게 인쇄된 결함 검출 (compare_artwork.py faded_findings)
+// --------------------------------------------------------------------------
+// 픽셀 diff는 잉크 마스크가 이진이라 "회색으로 인쇄된 글자"도 잉크로 잡아 diff가
+// 0이다 — 단어 하나가 통째로 흐려도 검출되지 않았다(실측 9000px에 0건). 그래서
+// REF 잉크 덩어리(글자)마다 REF와 TEST의 잉크 진하기를 같은 픽셀 집합에서 재고,
+// 페이지 중앙값 대비 상대적으로 유독 옅은 덩어리만 보고한다. 상대 판정이라
+// 전체적인 인쇄 질감 저하(사용자 피드백의 '망점·질감' 오탐)는 통과한다.
+//
+// 얇은 획 끊김(폭 ≤4px)은 이 경로로도 못 잡는다 — 잔여 정합 오차 2~3px를
+// 흡수하려면 근처를 훑어야 하고, 그러면 4px 결손이 이웃 잉크에 덮인다.
+function fadedComponents(cv: CV, refInk: Mat, testInk: Mat, ref: Mat,
+                         normTest: Mat, cfg: PipelineConfig,
+                         cbox: [number, number, number, number],
+                         ellipse: (k: number) => Mat): Comp[] {
+  const px = ref.cols / REF_BASE_WIDTH;
+  const minArea = Math.max(Math.round(cfg.coverMinArea * px * px), 20);
+  const pad = Math.max(Math.round(cfg.coverPad * px), 2);
+
+  // 글자 단위 라벨링(붙은 획만 잇는다 — 문단으로 묶으면 국소 이상이 묻힌다)
+  const grouped = new cv.Mat();
+  const kM = ellipse(cfg.coverMerge);
+  cv.dilate(refInk, grouped, kM);
+  kM.delete();
+  const labels = new cv.Mat(), stats = new cv.Mat(), cents = new cv.Mat();
+  const n = cv.connectedComponentsWithStats(grouped, labels, stats, cents, 8,
+                                            cv.CV_32S);
+  grouped.delete(); cents.delete();
+
+  // TEST는 pad만큼 최대값 필터(dilate)로 훑어 정합 오차에 둔감하게 한다.
+  const kP = ellipse(2 * pad + 1);
+  const testNear = new cv.Mat(), testDarkNear = new cv.Mat();
+  cv.dilate(testInk, testNear, kP);
+  // 255-normTest 를 만들지 않고, 어두움의 최대 = 밝음의 최소이므로 erode로 얻는다.
+  cv.erode(normTest, testDarkNear, kP);
+  kP.delete();
+
+  const W = ref.cols;
+  const ri = refInk.data, ld = labels.data32S, tn = testNear.data;
+  const rg = ref.data, tg = testDarkNear.data;
+  // 라벨별 집계 — 덩어리가 수만 개라 라벨 배열로 한 번에 더한다.
+  const area = new Float64Array(n), covered = new Float64Array(n);
+  const refSum = new Float64Array(n), testSum = new Float64Array(n);
+  for (let y = 0, o = 0; y < ref.rows; y++) {
+    for (let x = 0; x < W; x++, o++) {
+      if (!ri[o]) continue;
+      const l = ld[o];
+      area[l]++;
+      if (tn[o]) covered[l]++;
+      refSum[l] += 255 - rg[o];
+      testSum[l] += 255 - tg[o];
+    }
+  }
+  labels.delete(); testNear.delete(); testDarkNear.delete();
+
+  const [cx0, cy0, cx1, cy1] = cbox;
+  const idx: number[] = [];
+  for (let i = 1; i < n; i++) {
+    if (area[i] < minArea) continue;
+    const x = stats.data32S[i * 5], y = stats.data32S[i * 5 + 1];
+    const w = stats.data32S[i * 5 + 2], h = stats.data32S[i * 5 + 3];
+    if (x + w < cx0 || x > cx1 || y + h < cy0 || y > cy1) continue;
+    idx.push(i);
+  }
+  if (!idx.length) { stats.delete(); return []; }
+
+  const ratio = (i: number) => (refSum[i] > 0 ? testSum[i] / refSum[i] : 1);
+  const sorted = idx.map(ratio).sort((a, b) => a - b);
+  const medDark = sorted[Math.floor(sorted.length / 2)];
+  const lim = Math.min(cfg.fadeRel * medDark, cfg.fadeAbs);
+  const out: Comp[] = [];
+  for (const i of idx) {
+    if (ratio(i) >= lim) continue;
+    out.push({
+      bbox: [stats.data32S[i * 5], stats.data32S[i * 5 + 1],
+             stats.data32S[i * 5 + 2], stats.data32S[i * 5 + 3]],
+      area: area[i],
+      // 화면 문구에 쓰는 농도비(퍼센트)
+      darkPct: Math.round(ratio(i) * 100),
+    } as Comp & { darkPct: number });
+  }
+  stats.delete();
+  return out;
 }
 
 // --------------------------------------------------------------------------

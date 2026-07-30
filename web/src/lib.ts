@@ -99,6 +99,11 @@ export function mapDisplay(f: Finding): Disp | null {
     }
     case "missing":
       return { ktype: "인쇄 누락", severity: "critical", note: "미 인쇄(인쇄 누락)" };
+    case "faded":
+      // 미인쇄와는 구분한다 — 사용자도 "흐리긴 하지만 미 인쇄는 아니다"라고
+      // 따로 판정한다. 문구에 실측 농도비(엔진 note)를 그대로 붙인다.
+      return { ktype: "인쇄 농도", severity: "major",
+               note: f.note || "인쇄 농도 부족(옅게 인쇄됨)" };
     default:
       return null;
   }

@@ -74,6 +74,16 @@ describe("mapDisplay", () => {
     const d = mapDisplay(finding({ id: 1, type: "text_mismatch", note: "노트만" }));
     expect(d!.note).toBe("인쇄 내용 불일치"); // detail 없음 → 괄호 미표기
   });
+  it("faded는 '인쇄 농도'(major)로, 엔진 문구를 그대로 쓴다", () => {
+    const d = mapDisplay(finding({ id: 1, type: "faded",
+      note: "인쇄 농도 부족 — 잉크 진하기가 이 페이지 평균의 55% 수준(옅게 인쇄됨)" }));
+    expect(d).toMatchObject({ ktype: "인쇄 농도", severity: "major" });
+    expect(d!.note).toContain("55%");
+  });
+  it("faded에 문구가 없으면 기본 설명", () => {
+    const d = mapDisplay(finding({ id: 1, type: "faded", note: "" }));
+    expect(d!.note).toBe("인쇄 농도 부족(옅게 인쇄됨)");
+  });
   it("showthrough·trim_mark는 표시 제외(null)", () => {
     expect(mapDisplay(finding({ id: 1, type: "showthrough" }))).toBeNull();
     expect(mapDisplay(finding({ id: 1, type: "trim_mark_expected" }))).toBeNull();

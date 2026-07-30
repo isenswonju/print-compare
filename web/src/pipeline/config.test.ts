@@ -11,7 +11,7 @@ describe("pipeline config 상수", () => {
   it("핵심 파라미터가 Python 원본과 일치", () => {
     expect(defaultConfig.tol).toBe(5);
     expect(defaultConfig.tolFallback).toBe(13);
-    expect(defaultConfig.minArea).toBe(60);
+    expect(defaultConfig.minArea).toBe(40);   // 60→40 (미검출 가혹 테스트 근거)
     expect(defaultConfig.orbFeatures).toBe(20000);
     expect(defaultConfig.loweRatio).toBeCloseTo(0.75);
     expect(defaultConfig.scaleRange).toEqual([0.9, 1.1]);
@@ -27,5 +27,13 @@ describe("pipeline config 상수", () => {
     expect(defaultConfig.threshBlock).toBe(41);
     expect(defaultConfig.mergeKernel).toBe(31);
     expect(defaultConfig.ghostMinArea).toBe(800);
+  });
+
+  it("인쇄 농도 검사(3.4b) 파라미터가 Python과 일치", () => {
+    expect(defaultConfig.coverMinArea).toBe(120);
+    expect(defaultConfig.coverMerge).toBe(3);
+    expect(defaultConfig.coverPad).toBe(3);
+    expect(defaultConfig.fadeRel).toBeCloseTo(0.70);
+    expect(defaultConfig.fadeAbs).toBeCloseTo(0.80);
   });
 });

@@ -43,6 +43,12 @@ export function trivialDiff(tag: string, aWords: string[], bWords: string[]): bo
   if (!alnum(aJoin) && !alnum(bJoin)) return true;
   if (aJoin === bJoin) return true;
   if (translateConfusable(aJoin) === translateConfusable(bJoin)) return true;
+  // 대소문자만 다른 경우 ('for' vs 'For', 'AST' vs 'ast') — 인쇄 결함은 글자
+  // 모양을 훼손하지 그 자체를 대문자로 바꾸지 않는다. 진짜 글리프 훼손이라면
+  // 잉크 diff 경로가 잡는다. (구두점 차이는 여기서 무시하지 않는다 — 빠진
+  // 마침표는 실제 결함일 수 있어 계속 보고한다.)
+  if (translateConfusable(aJoin.toLowerCase()) ===
+      translateConfusable(bJoin.toLowerCase())) return true;
   if ((tag === "insert" || tag === "delete") &&
       (alnum(aJoin) + alnum(bJoin)).length < 4) return true;
   return false;

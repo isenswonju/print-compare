@@ -31,7 +31,9 @@ REF_BASE_WIDTH = 5564  # min-area 기준 해상도
 class Config:
     tol: int = 5                    # 타일 정합 후 diff 팽창 허용치(px)
     tol_fallback: int = 13          # 타일 정합 생략(폴백) 시 허용치
-    min_area: int = 60              # REF 폭 5564px 기준 최소 diff 잉크 픽셀 수
+    min_area: int = 40              # REF 폭 5564px 기준 최소 diff 잉크 픽셀 수
+                                    # (60→40: 미검출 가혹 테스트에서 50px급 결함을
+                                    #  놓쳤고, 40에서는 픽스처 오탐이 늘지 않았다)
     use_ocr: bool = True
     use_tile_refine: bool = True
     llm_verify: bool = False
@@ -74,6 +76,15 @@ class Config:
     reflow_exclude: int = 12       # 이 변위 이내 매칭은 정상 정합(억제 대상 아님)
     reflow_min_cover: float = 0.6  # diff 잉크가 변위 위치의 상대 잉크로 덮여야 하는 비율
 
+    # 잉크 커버리지 검사(3.4b) — 얇은 획 끊김 / 옅은 인쇄
+    # 판정은 페이지 중앙값 대비 상대값이라, 전체적으로 옅은 인쇄는 통과하고
+    # 국소적으로 유독 빠진/흐린 덩어리만 걸린다.
+    cover_min_area: int = 120      # 검사 대상 REF 잉크 덩어리 최소 면적(REF 폭 5564 기준)
+    cover_merge: int = 3           # 붙은 획만 잇는 최소 팽창(글자 단위 유지)
+    cover_pad: int = 3             # TEST를 훑는 여유(px) — 잔여 정합 오차 흡수
+    fade_rel: float = 0.70         # 농도비가 페이지 중앙값의 이 배수 미만이면 옅은 인쇄
+    fade_abs: float = 0.80         # 동시에 이 절대값 미만일 때만(전체가 옅은 경우 방어)
+
     # 뒷비침
     ghost_lo: int = 150
     ghost_hi: int = 225
@@ -91,7 +102,8 @@ class Config:
 @dataclass
 class Finding:
     id: int = 0
-    type: str = ""       # extra | missing | showthrough | text_mismatch | trim_mark_expected | layout_reflow
+    type: str = ""       # extra | missing | faded | showthrough | text_mismatch
+                         # | trim_mark_expected | layout_reflow
     severity: str = ""   # critical | major | minor | expected
     bbox_ref: tuple = (0, 0, 0, 0)
     area_px: int = 0
@@ -368,6 +380,93 @@ def structural_diff(ref_ink: np.ndarray, test_ink: np.ndarray, tol: int):
 
 
 # ---------------------------------------------------------------------------
+# 3.4b 인쇄 농도 검사 — 옅게 인쇄된 결함 검출
+# ---------------------------------------------------------------------------
+# 픽셀 diff(3.4)는 두 가지를 원리적으로 못 잡는다.
+#   * 옅은 인쇄: 잉크 마스크가 이진이라 "회색으로 인쇄된 글자"도 잉크로 잡혀
+#     diff가 0이다. 단어 하나가 통째로 흐려도 검출되지 않았다(9000px인데 0건).
+#   * 얇은 획 끊김(폭 ≤4px): 여기서도 못 잡는다. 잔여 정합 오차 2~3px를 흡수하려면
+#     근처를 훑어야 하는데, 그러면 4px 결손은 이웃 잉크에 덮인다. 실측에서 cover
+#     0.99·농도비 1.12로 정상과 구분되지 않았다 — 정합 정밀도의 한계다.
+#
+# 그래서 픽셀 대신 **REF 잉크 덩어리(글자·획) 단위로 집계값을 비교**한다.
+# 덩어리 박스 안의 잉크량·잉크 농도를 REF와 TEST에서 각각 재는 방식이라
+# 위치가 몇 px 어긋나도 값이 흔들리지 않는다 — tol을 낮출 필요가 없다.
+#
+# 핵심은 **페이지 중앙값 대비 상대 판정**이다. 인쇄 질감이 전체적으로 떨어지면
+# 모든 덩어리의 잉크량·농도가 함께 낮아지므로, 절대 기준으로 보면 페이지 전체가
+# 결함이 된다(사용자 피드백의 "망점·질감" 오탐이 정확히 이 형태였다). 페이지
+# 중앙값을 기준선으로 삼으면 "전체적으로 옅은 인쇄"는 통과하고 "유독 이 덩어리만
+# 빠졌다/흐리다"만 남는다.
+
+def faded_findings(ref_ink: np.ndarray, test_ink: np.ndarray,
+                   ref: np.ndarray, norm_test: np.ndarray,
+                   cfg: Config, cbox: tuple) -> list[dict]:
+    """REF 잉크 덩어리별 인쇄 농도를 비교해 '옅게 인쇄된' 후보를 낸다.
+
+    반환: [{bbox, area, cover, dark_ratio}]
+    """
+    px = ref.shape[1] / REF_BASE_WIDTH
+    min_area = max(int(cfg.cover_min_area * px ** 2), 20)
+    # 여유(pad)는 좁게 — 넓으면 옆 글자의 잉크가 결손을 덮어 픽셀 diff와 같은
+    # 한계에 빠진다(tol 문제와 동일). 잔여 정합 오차는 타일 정합 후 |shift|
+    # 중앙값 2~3px이고, 전체적인 어긋남은 페이지 중앙값 정규화가 흡수한다.
+    pad = max(round(cfg.cover_pad * px), 2)
+
+    # 글자 단위로 본다(획을 문단으로 묶으면 국소 이상이 평균에 묻힌다). 붙어 있는
+    # 획만 이어지도록 아주 작은 커널로만 묶는다.
+    grouped = (cv2.dilate(ref_ink, ellipse(cfg.cover_merge))
+               if cfg.cover_merge > 1 else ref_ink)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(grouped, 8, cv2.CV_32S)
+    if n <= 1:
+        return []
+
+    # REF 잉크가 있는 자리에서 REF와 TEST의 잉크 진하기를 **같은 픽셀 집합**으로
+    # 잰다. TEST는 최대값 필터(dilate)로 pad만큼 훑어 정합 오차에 둔감하게 한다.
+    ref_dark = (255 - ref).astype(np.int32)
+    test_dark = cv2.dilate(255 - norm_test, ellipse(2 * pad + 1)).astype(np.int32)
+    test_ink_near = cv2.dilate(test_ink, ellipse(2 * pad + 1))
+
+    # 컴포넌트가 수만 개라 파이썬 루프로는 못 돈다 — bincount로 한 번에 집계한다.
+    ink = ref_ink > 0
+    lab = labels[ink]
+    area = np.bincount(lab, minlength=n).astype(np.float64)
+    covered = np.bincount(lab, weights=(test_ink_near[ink] > 0).astype(np.float64),
+                          minlength=n)
+    ref_sum = np.bincount(lab, weights=ref_dark[ink].astype(np.float64),
+                          minlength=n)
+    test_sum = np.bincount(lab, weights=test_dark[ink].astype(np.float64),
+                           minlength=n)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        cover = np.where(area > 0, covered / area, 1.0)
+        dark_ratio = np.where(ref_sum > 0, test_sum / ref_sum, 1.0)
+
+    cx0, cy0, cx1, cy1 = cbox
+    x, y, w, h = (stats[:, 0], stats[:, 1], stats[:, 2], stats[:, 3])
+    inside = (x + w >= cx0) & (x <= cx1) & (y + h >= cy0) & (y <= cy1)
+    keep = (area >= min_area) & inside
+    keep[0] = False                      # 배경 라벨
+    idx = np.nonzero(keep)[0]
+    if idx.size == 0:
+        return []
+
+    # 페이지 기준선(중앙값) — 전체적인 인쇄 질감 차이를 상쇄한다. 실측에서 전체
+    # 블러+노이즈+톤 저하를 먹여도 중앙값이 1.13→1.11로만 움직였다(=전체적으로
+    # 옅은 인쇄는 통과), 반면 국소적으로 옅어진 글자는 0.49로 떨어진다.
+    med_dark = float(np.median(dark_ratio[idx]))
+    lim = min(cfg.fade_rel * med_dark, cfg.fade_abs)
+    out = []
+    for i in idx:
+        d = float(dark_ratio[i])
+        if d >= lim:
+            continue
+        out.append({"bbox": (int(x[i]), int(y[i]), int(w[i]), int(h[i])),
+                    "area": int(area[i]), "cover": float(cover[i]),
+                    "dark_ratio": d})
+    return out
+
+
+# ---------------------------------------------------------------------------
 # 3.5 군집화 / 필터링 / 기대차이
 # ---------------------------------------------------------------------------
 
@@ -560,6 +659,13 @@ def _trivial_diff(tag: str, a_words: list[str], b_words: list[str]) -> bool:
         return True
     # 혼동 문자 정규화 후 동일 ('1-SENS' vs 'i-SENS')
     if a_join.translate(_CONFUSABLE) == b_join.translate(_CONFUSABLE):
+        return True
+    # 대소문자만 다른 경우 ('for' vs 'For', 'AST' vs 'ast') — 인쇄 결함은 글자
+    # 모양을 훼손하지 그 자체를 대문자로 바꾸지 않는다. 진짜 글리프 훼손이라면
+    # 잉크 diff 경로가 잡는다. (구두점 차이는 여기서 무시하지 않는다 — 빠진
+    # 마침표는 실제 결함일 수 있어 계속 보고한다.)
+    if (a_join.lower().translate(_CONFUSABLE)
+            == b_join.lower().translate(_CONFUSABLE)):
         return True
     # 삽입/삭제는 실단어 수준(영숫자 4자 이상)만 결함으로 인정
     if tag in ("insert", "delete") and len(_alnum(a_join) + _alnum(b_join)) < 4:
@@ -990,6 +1096,24 @@ def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
         else:
             findings.append(Finding(type="missing", bbox_ref=c["bbox"],
                                     area_px=c["area"]))
+
+    # 3.4b 잉크 커버리지 — 픽셀 diff가 원리적으로 못 잡는 얇은 결손·옅은 인쇄.
+    # 이미 보고된 결함·리플로우 영역과 겹치는 것은 중복이라 뺀다.
+    cover_hits = faded_findings(ref_ink, test_ink, ref, norm_test, cfg, cbox)
+    reported = [f.bbox_ref for f in findings] + reflow_boxes
+    n_cover = 0
+    for c in cover_hits:
+        if any(boxes_intersect(c["bbox"], b) for b in reported):
+            continue
+        if in_margin(c["bbox"], ref.shape, cfg.margin_ratio):
+            continue
+        findings.append(Finding(
+            type="faded", bbox_ref=c["bbox"], area_px=c["area"],
+            note=f"인쇄 농도 부족 — 잉크 진하기가 이 페이지 평균의 "
+                 f"{c['dark_ratio'] * 100:.0f}% 수준(옅게 인쇄됨)"))
+        n_cover += 1
+    if cover_hits:
+        print(f"[농도] 옅은 인쇄 후보 {len(cover_hits)}건 → 신규 보고 {n_cover}건")
 
     # 3.6 뒷비침 (밀린 본문 텍스트가 고스트로 오탐되는 경우도 리플로우 매칭으로 억제)
     # 위/아래 밀림량이 다른 경계 성분은 단일 변위 매칭이 실패할 수 있으므로,

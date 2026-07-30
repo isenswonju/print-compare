@@ -64,3 +64,19 @@ describe("textMismatches", () => {
     expect(out[0].bbox).toEqual([40, 0, 60, 10]);
   });
 });
+
+describe("trivialDiff — 대소문자 접기", () => {
+  it("대소문자만 다르면 OCR 노이즈로 무시한다", () => {
+    expect(trivialDiff("replace", ["for"], ["For"])).toBe(true);
+    expect(trivialDiff("replace", ["AST"], ["ast"])).toBe(true);
+    // 혼동문자와 함께 걸려도 무시('1-SENS' vs 'i-sens')
+    expect(trivialDiff("replace", ["1-SENS"], ["i-sens"])).toBe(true);
+  });
+  it("구두점 차이는 계속 보고한다(빠진 마침표는 실제 결함일 수 있음)", () => {
+    expect(trivialDiff("replace", ["blood"], ["blood:"])).toBe(false);
+    expect(trivialDiff("replace", ["mg/dL"], ["mg/dL."])).toBe(false);
+  });
+  it("내용이 실제로 다르면 대소문자 접기로도 통과하지 않는다", () => {
+    expect(trivialDiff("replace", ["Results"], ["Resultss"])).toBe(false);
+  });
+});

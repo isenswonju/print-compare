@@ -31,6 +31,10 @@ export interface Finding {
   area_px: number;
   near_text: string;
   note: string;
+  // 임계값 여유도(정확도 안전망용, Python Finding.metrics 와 동일 계약).
+  // margin 1.0 = 임계값에 딱 걸침. 통과했는데 마진이 줄어드는 변경은 아직
+  // 안 터진 회귀이므로 bench 가 WARN 으로 잡는다.
+  metrics?: { margin: number | null; basis: string };
 }
 
 export interface PipelineResult {

@@ -1,0 +1,974 @@
+{
+  "records": {
+    "python/benign-blur_noise": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 0,
+      "elapsed_s": 14.2,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "python/benign-combo": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 0,
+      "elapsed_s": 14.9,
+      "findings_total": 1,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "python/benign-jpeg": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 0,
+      "elapsed_s": 13.3,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "python/benign-shift_rotate": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 0,
+      "elapsed_s": 12.9,
+      "findings_total": 1,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "python/benign-tone_down": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 0,
+      "elapsed_s": 12.9,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "python/identity-artwork": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 0,
+      "elapsed_s": 12.8,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "python/identity-scan": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 0,
+      "elapsed_s": 12.8,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "python/inject-erase_char-clean": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 2,
+      "elapsed_s": 12.8,
+      "findings_total": 2,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "erase_char": 7.775
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-erase_char-degraded": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 2,
+      "elapsed_s": 13.9,
+      "findings_total": 2,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "erase_char": 7.75
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-erase_line-clean": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 2,
+      "elapsed_s": 12.9,
+      "findings_total": 2,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "erase_line": 101.1
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-erase_line-degraded": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 2,
+      "elapsed_s": 14.0,
+      "findings_total": 2,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "erase_line": 100.35
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-erase_period-clean": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 0,
+      "elapsed_s": 12.8,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "python/inject-erase_period-degraded": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 0,
+      "elapsed_s": 13.8,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "python/inject-erase_word-clean": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 2,
+      "elapsed_s": 12.9,
+      "findings_total": 2,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "erase_word": 44.525
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-erase_word-degraded": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 2,
+      "elapsed_s": 13.9,
+      "findings_total": 2,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "erase_word": 44.4
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-faded_word-clean": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 5,
+      "elapsed_s": 12.9,
+      "findings_total": 5,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "faded_word": 1.612
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-faded_word-degraded": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 5,
+      "elapsed_s": 14.0,
+      "findings_total": 5,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "faded_word": 1.583
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-fill_glyph-clean": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 2,
+      "elapsed_s": 12.8,
+      "findings_total": 2,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "fill_glyph": 3.725
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-fill_glyph-degraded": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 2,
+      "elapsed_s": 13.9,
+      "findings_total": 2,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "fill_glyph": 3.725
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-shift_block-clean": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 2,
+      "elapsed_s": 12.8,
+      "findings_total": 2,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "shift_block": 11.95
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-shift_block-degraded": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 2,
+      "elapsed_s": 13.9,
+      "findings_total": 2,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "shift_block": 12.975
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-spot_near_text-clean": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 1,
+      "elapsed_s": 12.8,
+      "findings_total": 1,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "spot_near_text": 2.825
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-spot_near_text-degraded": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 1,
+      "elapsed_s": 13.9,
+      "findings_total": 1,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "spot_near_text": 2.825
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-spot_small-clean": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 1,
+      "elapsed_s": 13.2,
+      "findings_total": 1,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "spot_small": 4.925
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-spot_small-degraded": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 1,
+      "elapsed_s": 13.9,
+      "findings_total": 1,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "spot_small": 4.925
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-spot_tiny-clean": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 1,
+      "elapsed_s": 13.1,
+      "findings_total": 1,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "spot_tiny": 1.225
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-spot_tiny-degraded": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 1,
+      "elapsed_s": 14.3,
+      "findings_total": 1,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {
+        "spot_tiny": 1.225
+      },
+      "recall": [
+        1,
+        1
+      ],
+      "unlabeled": []
+    },
+    "python/inject-thin_stroke-clean": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 0,
+      "elapsed_s": 12.8,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "python/inject-thin_stroke-degraded": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 0,
+      "elapsed_s": 13.9,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "python/pga1e0398": {
+      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "defects_total": 12,
+      "elapsed_s": 14.1,
+      "findings_total": 24,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 1,
+      "margins": {
+        "1": 10.25,
+        "2": 4.5,
+        "3": 20.225,
+        "4": 10.55,
+        "5": 1.55,
+        "6": 58.229,
+        "7": 4.425,
+        "8": 10.075,
+        "9": 3.125
+      },
+      "recall": [
+        9,
+        9
+      ],
+      "unlabeled": [
+        {
+          "area_px": 103,
+          "bbox": [
+            2073,
+            4277,
+            9,
+            15
+          ],
+          "id": 6,
+          "margin": 2.575,
+          "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
+          "severity": "major",
+          "type": "extra"
+        }
+      ]
+    },
+    "web/benign-combo": {
+      "accepted_at": "2026-07-30T19:24:58+09:00",
+      "defects_total": 0,
+      "elapsed_s": 51.9,
+      "findings_total": 1,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "17f2a582a8dc",
+        "dirty": true,
+        "engine": "web",
+        "os": "Darwin arm64",
+        "versions": {
+          "node": "v26.0.0",
+          "opencv-js": "^4.10.0-release.1",
+          "tesseract.js": "^5.1.1"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "web/identity-scan": {
+      "accepted_at": "2026-07-30T19:24:58+09:00",
+      "defects_total": 0,
+      "elapsed_s": 45.2,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "17f2a582a8dc",
+        "dirty": true,
+        "engine": "web",
+        "os": "Darwin arm64",
+        "versions": {
+          "node": "v26.0.0",
+          "opencv-js": "^4.10.0-release.1",
+          "tesseract.js": "^5.1.1"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "web/pga1e0398": {
+      "accepted_at": "2026-07-30T19:24:58+09:00",
+      "defects_total": 15,
+      "elapsed_s": 50.0,
+      "findings_total": 27,
+      "fingerprint": {
+        "commit": "0039b01",
+        "config_hash": "17f2a582a8dc",
+        "dirty": true,
+        "engine": "web",
+        "os": "Darwin arm64",
+        "versions": {
+          "node": "v26.0.0",
+          "opencv-js": "^4.10.0-release.1",
+          "tesseract.js": "^5.1.1"
+        }
+      },
+      "fp_count": 3,
+      "margins": {
+        "1": 10.075,
+        "2": 4.65,
+        "3": 20.35,
+        "4": 10.675,
+        "5": 1.5,
+        "6": 28.605,
+        "7": 3.975,
+        "8": 10.225,
+        "9": 3.125
+      },
+      "recall": [
+        9,
+        9
+      ],
+      "unlabeled": [
+        {
+          "area_px": 6847,
+          "bbox": [
+            4819,
+            709,
+            167,
+            41
+          ],
+          "id": 1,
+          "margin": null,
+          "note": "OCR 불일치: '2025-04' → '2025-84'",
+          "severity": "critical",
+          "type": "text_mismatch"
+        },
+        {
+          "area_px": 99,
+          "bbox": [
+            2073,
+            4277,
+            9,
+            15
+          ],
+          "id": 6,
+          "margin": 2.475,
+          "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
+          "severity": "major",
+          "type": "extra"
+        },
+        {
+          "area_px": 736,
+          "bbox": [
+            1348,
+            5977,
+            23,
+            32
+          ],
+          "id": 8,
+          "margin": null,
+          "note": "OCR 불일치: 'Owner's' → 's'",
+          "severity": "critical",
+          "type": "text_mismatch"
+        }
+      ]
+    }
+  },
+  "version": 1
+}

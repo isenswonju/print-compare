@@ -1,18 +1,25 @@
 // Node 검증 하니스 — 브라우저와 동일한 엔진 코드를 Node에서 실행해
 // Python 기준 결과(findings.json)와 대조한다.
-// 사용: node tools/harness.mjs <REF.png> <TEST.png> [--no-ocr] [--no-tile] [--baseline <json>]
-import { readFileSync } from "node:fs";
+// 사용: node tools/harness.cjs <REF.png> <TEST.png>
+//         [--no-ocr] [--no-tile] [--baseline <json>] [--json <out.json>]
+// --json 은 정확도 안전망(`python -m bench.run --engine web`)이 결과를 받는 통로다.
+import { readFileSync, writeFileSync } from "node:fs";
 import { PNG } from "pngjs";
 import { runPipeline } from "../src/pipeline/engine.ts";
 import { wordsFromTesseract } from "../src/pipeline/ocr.ts";
 import { defaultConfig } from "../src/pipeline/config.ts";
 
 const args = process.argv.slice(2);
-const files = args.filter((a) => !a.startsWith("--"));
+// 값을 받는 옵션(--baseline/--json)의 값이 입력 파일로 오인되지 않게 걸러낸다.
+const VALUED = new Set(["--baseline", "--json"]);
+const files = args.filter((a, i) =>
+  !a.startsWith("--") && !VALUED.has(args[i - 1]));
 const useOcr = !args.includes("--no-ocr");
 const useTile = !args.includes("--no-tile");
 const baselineIdx = args.indexOf("--baseline");
 const baselinePath = baselineIdx >= 0 ? args[baselineIdx + 1] : null;
+const jsonIdx = args.indexOf("--json");
+const jsonPath = jsonIdx >= 0 ? args[jsonIdx + 1] : null;
 
 function loadPNG(path) {
   const png = PNG.sync.read(readFileSync(path));
@@ -85,6 +92,15 @@ export async function main(cv) {
     `${String(f.id).padStart(3)} ${f.type.padEnd(18)} ${f.severity.padEnd(9)} ` +
     `[${f.bbox_ref.join(", ")}] ${f.note.slice(0, 50)}`;
   result.findings.forEach((f) => console.log(fmt(f)));
+
+  if (jsonPath) {
+    writeFileSync(jsonPath, JSON.stringify({
+      ref: refPath, test: testPath, ocr: useOcr, tile: useTile,
+      findings: result.findings, totalMs: result.totalMs,
+      timings: result.timings,
+    }, null, 1));
+    console.log(`[json] ${jsonPath}`);
+  }
 
   if (baselinePath) {
     const base = JSON.parse(readFileSync(baselinePath, "utf-8"));

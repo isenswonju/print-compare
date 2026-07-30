@@ -1,0 +1,26 @@
+{
+  "id": "pga1e0398",
+  "kind": "labeled",
+  "group": "tune",
+  "source": {
+    "ref": "tests/fixtures/PGA1E0398_REF.png",
+    "test": "tests/fixtures/PGA1E0398_TEST.png"
+  },
+  "fp_budget": 5,
+  "note": "실물 회귀 픽스처. 라벨 출처는 지시서 §5 표(#2·#5는 실측 교정) — tests/test_fixture.py 와 동일한 계약. min_area 60→40 결정에 쓰였으므로 tune 셋",
+  "must_find": [
+    { "id": "1", "types": ["extra"], "bbox": [1520, 670, 200, 170], "note": "잉크 스팟" },
+    { "id": "2", "types": ["extra"], "bbox": [4900, 700, 100, 60], "critical": true,
+      "note": "REV 행 '2025-04'의 0 메워짐 (실측 교정 좌표)" },
+    { "id": "3", "types": ["extra"], "bbox": [4850, 1215, 130, 140], "note": "잉크 스팟" },
+    { "id": "4", "types": ["extra", "text_mismatch"], "bbox": [3390, 2635, 130, 130], "note": "" },
+    { "id": "5", "types": ["extra"], "bbox": [1700, 2960, 40, 40],
+      "note": "expiration 'n' 잉크 뭉침 (실측 교정 좌표)" },
+    { "id": "6", "types": ["showthrough"], "bbox": [512, 5469, 2157, 606], "note": "뒷비침" },
+    { "id": "7", "types": ["extra"], "bbox": [1330, 6340, 160, 90], "note": "" },
+    { "id": "8", "types": ["extra", "text_mismatch"], "bbox": [3930, 6090, 190, 80], "note": "" },
+    { "id": "9", "types": ["extra", "text_mismatch"], "bbox": [3950, 4695, 140, 70],
+      "note": "Control→Oontrol" }
+  ],
+  "forbid": []
+}

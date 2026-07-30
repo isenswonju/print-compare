@@ -82,6 +82,13 @@ class Config:
     cover_min_area: int = 120      # 검사 대상 REF 잉크 덩어리 최소 면적(REF 폭 5564 기준)
     cover_merge: int = 3           # 붙은 획만 잇는 최소 팽창(글자 단위 유지)
     cover_pad: int = 3             # TEST를 훑는 여유(px) — 잔여 정합 오차 흡수
+    cover_ref_max: int = 190       # 농도 비교 대상 REF 잉크의 밝기 상한(배경 평탄화
+                                   # 후 기준 = 배경보다 25% 이상 어두운 픽셀만).
+                                   # 회색 톤 박스(210)와 배경 대비 10 남짓인 망점
+                                   # 잡티가 잉크로 섞이면, TEST만 평탄화되는 비대칭
+                                   # 때문에 통째로 "옅은 인쇄"로 오탐된다
+                                   # (안전망 identity 실측: 아트웍 1 + 스캔 11건).
+                                   # 근거값은 missing_max_ref와 동일.
     fade_rel: float = 0.70         # 농도비가 페이지 중앙값의 이 배수 미만이면 옅은 인쇄
     fade_abs: float = 0.80         # 동시에 이 절대값 미만일 때만(전체가 옅은 경우 방어)
 
@@ -109,9 +116,14 @@ class Finding:
     area_px: int = 0
     near_text: str = ""
     note: str = ""
+    # 임계값 여유도(정확도 안전망용). {"margin": 1.25, "basis": "면적 50 / 최소 40"}
+    # margin 1.0 = 임계값에 딱 걸친 상태. 통과했는데 마진이 줄어드는 변경은
+    # "아직 안 터진 회귀"이므로 bench 가 WARN 으로 잡는다. 연속 점수가 없는
+    # 유형(text_mismatch)은 비워 둔다.
+    metrics: dict = field(default_factory=dict)
 
     def to_dict(self):
-        return {
+        d = {
             "id": self.id,
             "type": self.type,
             "severity": self.severity,
@@ -120,6 +132,17 @@ class Finding:
             "near_text": self.near_text,
             "note": self.note,
         }
+        if self.metrics:
+            d["metrics"] = self.metrics
+        return d
+
+
+def area_margin(area: float, min_area: float) -> dict:
+    """면적 임계값에 대한 여유도. margin 1.0 = 임계값에 딱 걸친 상태."""
+    if min_area <= 0:
+        return {}
+    return {"margin": round(float(area) / min_area, 3),
+            "basis": f"면적 {int(area)} / 최소 {min_area:.0f}px"}
 
 
 # ---------------------------------------------------------------------------
@@ -401,10 +424,17 @@ def structural_diff(ref_ink: np.ndarray, test_ink: np.ndarray, tol: int):
 
 def faded_findings(ref_ink: np.ndarray, test_ink: np.ndarray,
                    ref: np.ndarray, norm_test: np.ndarray,
-                   cfg: Config, cbox: tuple) -> list[dict]:
+                   cfg: Config, cbox: tuple,
+                   norm_ref: np.ndarray | None = None) -> list[dict]:
     """REF 잉크 덩어리별 인쇄 농도를 비교해 '옅게 인쇄된' 후보를 낸다.
 
-    반환: [{bbox, area, cover, dark_ratio}]
+    반환: [{bbox, area, cover, dark_ratio, lim}]
+
+    norm_ref: 배경 평탄화한 REF(주지 않으면 여기서 계산). 농도 비교 대상 픽셀을
+    고르는 데만 쓴다 — 절대 밝기로 고르면 (a) 회색 톤 박스(210)와 (b) 배경 대비
+    10 남짓인 망점 잡티가 잉크로 섞여 들어와, TEST만 평탄화되는 비대칭 때문에
+    통째로 '옅은 인쇄'로 오탐된다(안전망 identity 케이스 실측: 아트웍 1건 +
+    스캔 11건). 평탄화 후 밝기로 보면 "배경보다 충분히 어두운 잉크"만 남는다.
     """
     px = ref.shape[1] / REF_BASE_WIDTH
     min_area = max(int(cfg.cover_min_area * px ** 2), 20)
@@ -428,7 +458,10 @@ def faded_findings(ref_ink: np.ndarray, test_ink: np.ndarray,
     test_ink_near = cv2.dilate(test_ink, ellipse(2 * pad + 1))
 
     # 컴포넌트가 수만 개라 파이썬 루프로는 못 돈다 — bincount로 한 번에 집계한다.
-    ink = ref_ink > 0
+    # 잉크 판정은 평탄화 후 밝기(= 배경 대비)로 한다 — 위 docstring 참조.
+    if norm_ref is None:
+        norm_ref = flatten_background(ref, cfg)
+    ink = (ref_ink > 0) & (norm_ref <= cfg.cover_ref_max)
     lab = labels[ink]
     area = np.bincount(lab, minlength=n).astype(np.float64)
     covered = np.bincount(lab, weights=(test_ink_near[ink] > 0).astype(np.float64),
@@ -462,7 +495,7 @@ def faded_findings(ref_ink: np.ndarray, test_ink: np.ndarray,
             continue
         out.append({"bbox": (int(x[i]), int(y[i]), int(w[i]), int(h[i])),
                     "area": int(area[i]), "cover": float(cover[i]),
-                    "dark_ratio": d})
+                    "dark_ratio": d, "lim": float(lim)})
     return out
 
 
@@ -1086,8 +1119,10 @@ def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
                                  raw_missing, test_ink_dil)
 
     findings: list[Finding] = []
+    min_area_eff = cfg.min_area * (ref.shape[1] / REF_BASE_WIDTH) ** 2
     for c in extra_comps:
-        findings.append(Finding(type="extra", bbox_ref=c["bbox"], area_px=c["area"]))
+        findings.append(Finding(type="extra", bbox_ref=c["bbox"], area_px=c["area"],
+                                metrics=area_margin(c["area"], min_area_eff)))
     for c in missing_comps:
         if in_margin(c["bbox"], ref.shape, cfg.margin_ratio):
             findings.append(Finding(type="trim_mark_expected",
@@ -1095,7 +1130,8 @@ def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
                                     note="재단선/레지스터 마크 (TEST 재단 완료) — 정상"))
         else:
             findings.append(Finding(type="missing", bbox_ref=c["bbox"],
-                                    area_px=c["area"]))
+                                    area_px=c["area"],
+                                    metrics=area_margin(c["area"], min_area_eff)))
 
     # 3.4b 잉크 커버리지 — 픽셀 diff가 원리적으로 못 잡는 얇은 결손·옅은 인쇄.
     # 이미 보고된 결함·리플로우 영역과 겹치는 것은 중복이라 뺀다.
@@ -1110,7 +1146,11 @@ def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
         findings.append(Finding(
             type="faded", bbox_ref=c["bbox"], area_px=c["area"],
             note=f"인쇄 농도 부족 — 잉크 진하기가 이 페이지 평균의 "
-                 f"{c['dark_ratio'] * 100:.0f}% 수준(옅게 인쇄됨)"))
+                 f"{c['dark_ratio'] * 100:.0f}% 수준(옅게 인쇄됨)",
+            # 농도는 낮을수록 결함이라 여유도가 판정선/실측값 비율이다.
+            metrics={"margin": round(c["lim"] / c["dark_ratio"], 3)
+                               if c["dark_ratio"] > 0 else None,
+                     "basis": f"농도비 {c['dark_ratio']:.3f} / 판정선 {c['lim']:.3f}"}))
         n_cover += 1
     if cover_hits:
         print(f"[농도] 옅은 인쇄 후보 {len(cover_hits)}건 → 신규 보고 {n_cover}건")
@@ -1141,7 +1181,8 @@ def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
     for c in st_comps:
         findings.append(Finding(type="showthrough", bbox_ref=c["bbox"],
                                 area_px=c["area"],
-                                note="뒷면 인쇄 비침(show-through) — 옅은 회색 고스트"))
+                                note="뒷면 인쇄 비침(show-through) — 옅은 회색 고스트",
+                                metrics=area_margin(c["area"], cfg.ghost_min_area)))
     print(f"[diff] extra {len(extra_comps)}/{n_extra_all}, "
           f"missing {len(missing_comps)}/{n_missing_all}, "
           f"showthrough {len(st_comps)}, 리플로우 억제 {len(reflow_boxes)}건")

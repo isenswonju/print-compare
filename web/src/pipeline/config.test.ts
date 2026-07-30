@@ -33,6 +33,8 @@ describe("pipeline config 상수", () => {
     expect(defaultConfig.coverMinArea).toBe(120);
     expect(defaultConfig.coverMerge).toBe(3);
     expect(defaultConfig.coverPad).toBe(3);
+    // 회색 톤(망점 박스)을 농도 비교에서 빼는 상한 — identity 케이스가 잡은 오탐
+    expect(defaultConfig.coverRefMax).toBe(190);
     expect(defaultConfig.fadeRel).toBeCloseTo(0.70);
     expect(defaultConfig.fadeAbs).toBeCloseTo(0.80);
   });

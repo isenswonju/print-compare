@@ -34,6 +34,14 @@ interface WorkFinding {
   area: number;
   note: string;
   nearText?: string;
+  metrics?: { margin: number | null; basis: string };
+}
+
+// 임계값 여유도 — Python 의 area_margin()과 같은 계약(1.0 = 임계값에 딱 걸침).
+function areaMargin(area: number, minArea: number) {
+  if (minArea <= 0) return undefined;
+  return { margin: Math.round((area / minArea) * 1000) / 1000,
+           basis: `면적 ${Math.trunc(area)} / 최소 ${Math.round(minArea)}px` };
 }
 
 export async function runPipeline(
@@ -213,15 +221,18 @@ export async function runPipeline(
   mark("리플로우", ts);
 
   const findings: WorkFinding[] = [];
+  const minAreaEff = cfg.minArea * (ref.cols / REF_BASE_WIDTH) ** 2;
   for (const c of extraComps)
-    findings.push({ type: "extra", bbox: c.bbox, area: c.area, note: "" });
+    findings.push({ type: "extra", bbox: c.bbox, area: c.area, note: "",
+                    metrics: areaMargin(c.area, minAreaEff) });
   for (const c of missingComps) {
     if (inMargin(c.bbox, ref, cfg.marginRatio))
       findings.push({ type: "trim_mark_expected", bbox: c.bbox, area: c.area,
                       severity: undefined,
                       note: "재단선/레지스터 마크 (TEST 재단 완료) — 정상" });
     else
-      findings.push({ type: "missing", bbox: c.bbox, area: c.area, note: "" });
+      findings.push({ type: "missing", bbox: c.bbox, area: c.area, note: "",
+                      metrics: areaMargin(c.area, minAreaEff) });
   }
 
   // 3.4b 인쇄 농도 — 픽셀 diff가 원리적으로 못 잡는 '옅게 인쇄됨'.
@@ -231,16 +242,28 @@ export async function runPipeline(
   {
     const reported = [...findings.map((f) => f.bbox), ...reflowBoxes];
     let nFaded = 0;
-    for (const c of fadedComponents(cv, refInk, testInk, ref, normTest, cfg,
-                                    cbox, ellipse)) {
+    // 농도 비교 대상 픽셀은 "배경보다 충분히 어두운 잉크"만이다 —
+    // 평탄화한 REF로 판정한다(fadedComponents 주석 참조). 큰 Mat이라 이 단계에서만
+    // 잡고 바로 해제한다(대형 라벨 wasm 힙 대책).
+    const normRef = flattenBackground(cv, ref, cfg, ellipse);
+    for (const c of fadedComponents(cv, refInk, testInk, ref, normRef, normTest,
+                                    cfg, cbox, ellipse)) {
       if (reported.some((b) => boxesIntersect(c.bbox, b))) continue;
       if (inMargin(c.bbox, ref, cfg.marginRatio)) continue;
-      const pct = (c as Comp & { darkPct?: number }).darkPct ?? 0;
+      const cc = c as Comp & { darkPct?: number; darkRatio?: number; lim?: number };
+      const pct = cc.darkPct ?? 0;
       findings.push({ type: "faded", bbox: c.bbox, area: c.area,
                       note: `인쇄 농도 부족 — 잉크 진하기가 이 페이지 평균의 ` +
-                            `${pct}% 수준(옅게 인쇄됨)` });
+                            `${pct}% 수준(옅게 인쇄됨)`,
+                      // 농도는 낮을수록 결함이라 여유도가 판정선/실측값 비율이다.
+                      metrics: cc.darkRatio && cc.lim
+                        ? { margin: Math.round((cc.lim / cc.darkRatio) * 1000) / 1000,
+                            basis: `농도비 ${cc.darkRatio.toFixed(3)} / ` +
+                                   `판정선 ${cc.lim.toFixed(3)}` }
+                        : undefined });
       nFaded++;
     }
+    normRef.delete();
     if (nFaded) log(`[농도] 옅은 인쇄 ${nFaded}건`);
   }
   mark("농도", ts);
@@ -272,7 +295,8 @@ export async function runPipeline(
     stComps = stKept;
     for (const c of stComps)
       findings.push({ type: "showthrough", bbox: c.bbox, area: c.area,
-                      note: "뒷면 인쇄 비침(show-through) — 옅은 회색 고스트" });
+                      note: "뒷면 인쇄 비침(show-through) — 옅은 회색 고스트",
+                      metrics: areaMargin(c.area, cfg.ghostMinArea) });
   } catch (err) {
     stComps = [];
     log("[뒷비침] 건너뜀 — " + describeCvError(err) +
@@ -373,6 +397,7 @@ export async function runPipeline(
       id: f.id!, type: f.type, severity: f.severity!,
       bbox_ref: f.bbox.map((v) => Math.trunc(v)),
       area_px: Math.trunc(f.area), near_text: f.nearText || "", note: f.note,
+      ...(f.metrics ? { metrics: f.metrics } : {}),
     })),
     timings, totalMs: total,
   };
@@ -468,8 +493,12 @@ function globalAlign(cv: CV, ref: Mat, test: Mat, cfg: PipelineConfig,
 //
 // 얇은 획 끊김(폭 ≤4px)은 이 경로로도 못 잡는다 — 잔여 정합 오차 2~3px를
 // 흡수하려면 근처를 훑어야 하고, 그러면 4px 결손이 이웃 잉크에 덮인다.
+// normRef: 배경 평탄화한 REF. 농도 비교 대상 픽셀을 고르는 데만 쓴다 — 절대
+// 밝기로 고르면 (a) 회색 톤 박스(210)와 (b) 배경 대비 10 남짓인 망점 잡티가
+// 잉크로 섞여 들어와, TEST만 평탄화되는 비대칭 때문에 통째로 '옅은 인쇄'로
+// 오탐된다(정확도 안전망 identity 케이스 실측: 아트웍 1건 + 스캔 11건).
 function fadedComponents(cv: CV, refInk: Mat, testInk: Mat, ref: Mat,
-                         normTest: Mat, cfg: PipelineConfig,
+                         normRef: Mat, normTest: Mat, cfg: PipelineConfig,
                          cbox: [number, number, number, number],
                          ellipse: (k: number) => Mat): Comp[] {
   const px = ref.cols / REF_BASE_WIDTH;
@@ -496,13 +525,14 @@ function fadedComponents(cv: CV, refInk: Mat, testInk: Mat, ref: Mat,
 
   const W = ref.cols;
   const ri = refInk.data, ld = labels.data32S, tn = testNear.data;
-  const rg = ref.data, tg = testDarkNear.data;
+  const rg = ref.data, tg = testDarkNear.data, nr = normRef.data;
   // 라벨별 집계 — 덩어리가 수만 개라 라벨 배열로 한 번에 더한다.
   const area = new Float64Array(n), covered = new Float64Array(n);
   const refSum = new Float64Array(n), testSum = new Float64Array(n);
+  // 잉크 판정은 평탄화 후 밝기(= 배경 대비)로 한다 — 위 함수 주석 참조.
   for (let y = 0, o = 0; y < ref.rows; y++) {
     for (let x = 0; x < W; x++, o++) {
-      if (!ri[o]) continue;
+      if (!ri[o] || nr[o] > cfg.coverRefMax) continue;
       const l = ld[o];
       area[l]++;
       if (tn[o]) covered[l]++;
@@ -534,9 +564,11 @@ function fadedComponents(cv: CV, refInk: Mat, testInk: Mat, ref: Mat,
       bbox: [stats.data32S[i * 5], stats.data32S[i * 5 + 1],
              stats.data32S[i * 5 + 2], stats.data32S[i * 5 + 3]],
       area: area[i],
-      // 화면 문구에 쓰는 농도비(퍼센트)
+      // 화면 문구에 쓰는 농도비(퍼센트) + 마진 계산용 원값
       darkPct: Math.round(ratio(i) * 100),
-    } as Comp & { darkPct: number });
+      darkRatio: ratio(i),
+      lim,
+    } as Comp & { darkPct: number; darkRatio: number; lim: number });
   }
   stats.delete();
   return out;

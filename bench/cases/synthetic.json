@@ -1,0 +1,73 @@
+[
+  {
+    "id": "identity-artwork",
+    "kind": "identity",
+    "group": "guard",
+    "fp_budget": 0,
+    "source": { "base": "tests/fixtures/PGA1E0398_REF.png" },
+    "note": "아트웍을 자기 자신과 비교 — 결함 0건이어야 한다(라벨링 비용 0)"
+  },
+  {
+    "id": "identity-scan",
+    "kind": "identity",
+    "group": "guard",
+    "fp_budget": 0,
+    "source": { "base": "tests/fixtures/PGA1E0398_TEST.png" },
+    "note": "실물 스캔을 자기 자신과 비교 — 망점·노이즈가 있어도 결함 0건"
+  },
+  {
+    "id": "benign",
+    "kind": "benign",
+    "group": "guard",
+    "fp_budget": 0,
+    "source": { "base": "tests/fixtures/PGA1E0398_REF.png" },
+    "expand": {
+      "recipe": ["shift_rotate", "blur_noise", "tone_down", "jpeg", "combo"]
+    },
+    "note": "결함이 아닌 열화(스큐·질감·전체 옅음·JPEG) — 전부 결함 0건이 정답. 오탐 팽창을 라벨 없이 잡는다"
+  },
+  {
+    "id": "inject",
+    "kind": "injected",
+    "group": "tune",
+    "fp_budget": 8,
+    "source": { "base": "tests/fixtures/PGA1E0398_REF.png" },
+    "expand": {
+      "defect": ["spot_tiny", "spot_small", "spot_near_text", "erase_char",
+                 "erase_word", "erase_line", "erase_period", "fill_glyph",
+                 "thin_stroke", "shift_block", "faded_word"],
+      "tier": ["clean", "degraded"]
+    },
+    "overrides": {
+      "inject-erase_period-clean": {
+        "waived": [{
+          "label": "erase_period", "date": "2026-07-30", "commit": "0039b01",
+          "lost": "마침표 크기(8x8, 면적 ~38px) 잉크 삭제는 검출하지 못한다",
+          "gained": "tol/min_area를 이만큼 낮추면 검출이 3~10배로 폭증해 못 쓴다. 잔여 정합 오차(2~3px)를 흡수하려면 주변을 훑어야 하고, 그러면 결손이 이웃 잉크에 덮이는 구조적 한계다(README 검출 한계)"
+        }]
+      },
+      "inject-erase_period-degraded": {
+        "waived": [{
+          "label": "erase_period", "date": "2026-07-30", "commit": "0039b01",
+          "lost": "마침표 크기 잉크 삭제(열화 스캔) 미검출",
+          "gained": "clean 단계와 같은 구조적 한계 — 위 항목 참조"
+        }]
+      },
+      "inject-thin_stroke-clean": {
+        "waived": [{
+          "label": "thin_stroke", "date": "2026-07-30", "commit": "0039b01",
+          "lost": "글자 안쪽 폭 4px 이하 획 끊김(4x20, 면적 ~56px) 미검출",
+          "gained": "결손 폭이 정합 잔차보다 얇아 팽창 그림자에 덮인다. 허용치를 낮추면 오탐이 폭증(README 검출 한계)"
+        }]
+      },
+      "inject-thin_stroke-degraded": {
+        "waived": [{
+          "label": "thin_stroke", "date": "2026-07-30", "commit": "0039b01",
+          "lost": "획 끊김(열화 스캔) 미검출",
+          "gained": "clean 단계와 같은 구조적 한계 — 위 항목 참조"
+        }]
+      }
+    },
+    "note": "심은 결함을 잡는지(미검출 게이트). tools/recall_stress.py 주입기를 그대로 쓴다 — 임계값 튜닝에 이미 쓰인 셋이라 tune"
+  }
+]

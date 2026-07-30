@@ -13,7 +13,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from compare_artwork import (Config, content_bbox_of, faded_findings,  # noqa: E402
-                            ink_mask)
+                            flatten_background, ink_mask)
 
 
 def make_page(fade_box=None, fade_all=False):
@@ -43,6 +43,54 @@ def hits(ref, test):
     ref_ink, test_ink = ink_mask(ref, cfg), ink_mask(test, cfg)
     cbox = content_bbox_of(ref_ink)
     return faded_findings(ref_ink, test_ink, ref, test, cfg, cbox)
+
+
+def make_gray_box_page():
+    """회색 톤 박스(망점 영역) 안에 검은 글자 — 실물 라벨의 CAUTION 박스 모양."""
+    img = np.full((600, 900), 255, np.uint8)
+    cv2.rectangle(img, (100, 80), (800, 220), 210, -1)     # 회색 톤 박스
+    for col in range(7):
+        x = 130 + col * 95
+        cv2.rectangle(img, (x, 120), (x + 60, 180), 0, -1)
+        cv2.rectangle(img, (x + 14, 134), (x + 46, 166), 210, -1)
+    return img
+
+
+def hits_pipeline(ref, test, **kw):
+    """파이프라인과 동일한 비대칭 전처리(TEST만 배경 평탄화)로 농도 검사."""
+    cfg = Config(use_ocr=False, **kw)
+    norm_test = flatten_background(test, cfg)
+    ref_ink, test_ink = ink_mask(ref, cfg), ink_mask(norm_test, cfg)
+    cbox = content_bbox_of(ref_ink)
+    return faded_findings(ref_ink, test_ink, ref, norm_test, cfg, cbox)
+
+
+def test_gray_tone_box_is_not_faded():
+    """회색 톤 박스를 옅은 인쇄로 오탐하지 않는다.
+
+    REF는 배경 평탄화를 하지 않고 TEST만 하기 때문에, 회색 박스(210)는 REF에서
+    adaptiveThreshold에 잉크로 잡히지만 TEST에서는 흰색이 된다. 그대로 농도를
+    비교하면 박스 테두리가 통째로 "농도 4% 수준"으로 보고됐다 —
+    정확도 안전망(bench) identity 케이스가 실물 픽스처에서 잡은 오탐이다.
+    cover_ref_max(190)로 회색 톤을 잉크 집계에서 빼서 막는다.
+    """
+    page = make_gray_box_page()
+    assert hits_pipeline(page, page.copy()) == []
+    # 상한을 풀면(=수정 전 동작) 다시 오탐이 난다 — 이 테스트가 정말 그 회귀를
+    # 지키고 있다는 증거.
+    assert hits_pipeline(page, page.copy(), cover_ref_max=255), \
+        "회귀 재현 조건이 사라졌다 — 테스트가 무엇을 지키는지 다시 확인할 것"
+
+
+def test_faded_text_inside_gray_box_still_detected():
+    """회색 박스 안의 글자가 옅게 인쇄되면 여전히 잡아야 한다(상한의 부작용 없음)."""
+    ref = make_gray_box_page()
+    test = ref.copy()
+    roi = test[120:180, 130:290].astype(np.float32)
+    test[120:180, 130:290] = (roi * 0.35 + 150).clip(0, 255).astype(np.uint8)
+    got = hits_pipeline(ref, test)
+    assert got, "회색 박스 안의 옅은 글자를 놓쳤다"
+    assert any(x < 290 and x + w > 130 for x, y, w, h in (g["bbox"] for g in got))
 
 
 def test_identical_pages_have_no_faded():

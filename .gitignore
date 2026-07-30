@@ -22,4 +22,9 @@ webjobs/
 
 # 생성 산출물·비공개 케이스(실물 라벨 이미지)는 저장소에 넣지 않는다
 bench/out/
+# 합성 케이스 이미지 캐시(레시피에서 언제든 재생성된다)
+bench/work/
 private/bench-cases/
+# 단, 안전망의 계약·기준선·이력은 반드시 커밋한다(코드와 함께 버전 관리돼야
+# 회귀를 커밋에 붙일 수 있다): bench/cases/, bench/baseline.json,
+# bench/history.jsonl

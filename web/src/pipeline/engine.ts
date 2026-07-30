@@ -16,6 +16,14 @@ import type { BBox, CV, Mat, ImageDataLike, Finding, PipelineResult,
 
 const now = () => (globalThis.performance ? performance.now() : Date.now());
 
+// wasm에서 올라온 예외는 메시지 없이 숫자(예외 포인터)로만 튀어나올 수 있다
+// — 그대로 두면 "120" 같은 값만 보인다. 대부분 힙 부족(bad_alloc)이다.
+function describeCvError(err: unknown): string {
+  if (typeof err === "number")
+    return `OpenCV 내부 오류(코드 ${err}) — 메모리 부족일 가능성이 큽니다`;
+  return String((err as Error)?.message || err);
+}
+
 interface Comp { bbox: BBox; area: number; }
 
 interface WorkFinding {
@@ -104,6 +112,10 @@ export async function runPipeline(
   ts = now();
   progress("잉크 이진화");
   const normTest = flattenBackground(cv, aligned, cfg, ellipse);
+  // aligned는 여기까지만 쓴다(RGBA 전달·배경 평탄화 완료) — 즉시 해제한다.
+  // opencv.js의 wasm 힙은 1GB가 상한이고 대형 라벨(7000×6600 = 46MB/장)에서는
+  // 죽은 Mat 하나가 뒤 단계의 할당 실패로 직결된다.
+  aligned.delete();
   const refInk = inkMask(cv, ref, cfg);
   const testInk = inkMask(cv, normTest, cfg);
   mark("이진화", ts);
@@ -129,6 +141,9 @@ export async function runPipeline(
                                      cfg.extraMaxNorm, cfg, ref, cbox, rectK);
   let missingComps = clusterComponents(cv, missing, rawMissing, ref,
                                        cfg.missingMaxRef, cfg, ref, cbox, rectK);
+  // open()한 마스크는 군집화까지만 쓴다 — 여기서 놓아준다(각 46MB).
+  // 원시 마스크(rawExtra/rawMissing)는 바로 아래 리플로우 검사가 아직 쓴다.
+  extra.delete(); missing.delete();
   mark("군집화", ts);
 
   // ---------------------------------------------------------------- 3.5b 리플로우 억제
@@ -183,6 +198,8 @@ export async function runPipeline(
   const nExtraAll = extraComps.length, nMissingAll = missingComps.length;
   extraComps = splitReflow(extraComps, normTest, ref, rawExtra, refInkDil);
   missingComps = splitReflow(missingComps, ref, normTest, rawMissing, testInkDil);
+  // 원시 diff 마스크는 여기까지 — 뒷비침 단계가 큰 버퍼를 잡기 전에 비워준다.
+  rawExtra.delete(); rawMissing.delete();
   mark("리플로우", ts);
 
   const findings: WorkFinding[] = [];
@@ -209,17 +226,27 @@ export async function runPipeline(
     }
     return false;
   };
-  let stComps = detectShowthrough(cv, normTest, ref, cfg, cbox, ellipse, rectK);
-  stComps = splitReflow(stComps, normTest, ref, testInk, refInkDil);
-  const stKept: Comp[] = [];
-  for (const c of stComps) {
-    if (overlapsReflow(c.bbox)) reflowBoxes.push(c.bbox);
-    else stKept.push(c);
+  // 이 단계는 결함을 새로 보고하지 않는다(뒷비침은 표시 대상이 아니고 리플로우
+  // 주석에만 쓰인다). 그래서 메모리 부족 같은 이유로 실패하면 페이지 전체를
+  // 실패시키지 말고 이 단계만 건너뛴다 — 결함 목록은 그대로 쓸 수 있다.
+  let stComps: Comp[] = [];
+  try {
+    stComps = detectShowthrough(cv, normTest, ref, cfg, cbox, ellipse, rectK);
+    stComps = splitReflow(stComps, normTest, ref, testInk, refInkDil);
+    const stKept: Comp[] = [];
+    for (const c of stComps) {
+      if (overlapsReflow(c.bbox)) reflowBoxes.push(c.bbox);
+      else stKept.push(c);
+    }
+    stComps = stKept;
+    for (const c of stComps)
+      findings.push({ type: "showthrough", bbox: c.bbox, area: c.area,
+                      note: "뒷면 인쇄 비침(show-through) — 옅은 회색 고스트" });
+  } catch (err) {
+    stComps = [];
+    log("[뒷비침] 건너뜀 — " + describeCvError(err) +
+        " (결함 검출 결과에는 영향 없음)");
   }
-  stComps = stKept;
-  for (const c of stComps)
-    findings.push({ type: "showthrough", bbox: c.bbox, area: c.area,
-                    note: "뒷면 인쇄 비침(show-through) — 옅은 회색 고스트" });
   log(`[diff] extra ${extraComps.length}/${nExtraAll}, ` +
       `missing ${missingComps.length}/${nMissingAll}, ` +
       `showthrough ${stComps.length}, 리플로우 억제 ${reflowBoxes.length}건`);
@@ -304,8 +331,9 @@ export async function runPipeline(
   boxMask.delete();
   mark("심각도", ts);
 
-  [ref, aligned, normTest, refInk, testInk, refInkDil, testInkDil,
-   rawExtra, rawMissing, extra, missing].forEach((m) => m.delete());
+  // aligned·diff 마스크는 위에서 이미 해제했다(대형 라벨 메모리 대책).
+  [ref, normTest, refInk, testInk, refInkDil, testInkDil]
+    .forEach((m) => m.delete());
 
   const total = Math.round(now() - t0);
   log(`[완료] ${(total / 1000).toFixed(1)}s`);
@@ -763,24 +791,26 @@ function detectShowthrough(cv: CV, normTest: Mat, ref: Mat, cfg: PipelineConfig,
                            cbox: [number, number, number, number],
                            ellipse: (k: number) => Mat,
                            rectK: (kw: number, kh: number) => Mat): Comp[] {
-  const blurred = new cv.Mat();
-  cv.medianBlur(normTest, blurred, cfg.ghostBlur);
+  // 전 과정을 전체 크기 버퍼 3장(band·below·refWhite)으로 끝낸다. 대형 라벨은
+  // 한 장이 46MB라, 예전처럼 6장을 동시에 들면 1GB wasm 힙에서 뒤 단계의
+  // connectedComponents(CV_32S 라벨 = 4바이트/px)가 할당에 실패한다.
+  const band = new cv.Mat(), below = new cv.Mat();
+  cv.medianBlur(normTest, band, cfg.ghostBlur);
   // inRange(lo+1, bandHi) = (>lo) AND (<=bandHi)
-  const above = new cv.Mat(), below = new cv.Mat(), band = new cv.Mat();
-  cv.threshold(blurred, above, cfg.ghostLo, 255, cv.THRESH_BINARY);
-  cv.threshold(blurred, below, cfg.ghostBandHi, 255, cv.THRESH_BINARY_INV);
-  cv.bitwise_and(above, below, band);
-  blurred.delete(); above.delete(); below.delete();
+  cv.threshold(band, below, cfg.ghostBandHi, 255, cv.THRESH_BINARY_INV);
+  cv.threshold(band, band, cfg.ghostLo, 255, cv.THRESH_BINARY); // 제자리
+  cv.bitwise_and(band, below, band);
+  below.delete();
 
-  const eroded = new cv.Mat(), refWhite = new cv.Mat();
+  const refWhite = new cv.Mat();
   const eK = ellipse(cfg.ghostRefErode);
-  cv.erode(ref, eroded, eK);
-  cv.threshold(eroded, refWhite, cfg.ghostRefWhite, 255, cv.THRESH_BINARY);
-  eK.delete(); eroded.delete();
+  cv.erode(ref, refWhite, eK);
+  cv.threshold(refWhite, refWhite, cfg.ghostRefWhite, 255, cv.THRESH_BINARY);
+  eK.delete();
 
-  const ghost = new cv.Mat();
+  const ghost = band; // band를 그대로 결과 버퍼로 재사용
   cv.bitwise_and(band, refWhite, ghost);
-  band.delete(); refWhite.delete();
+  refWhite.delete();
   const o3 = ellipse(3);
   cv.morphologyEx(ghost, ghost, cv.MORPH_OPEN, o3);
   o3.delete();

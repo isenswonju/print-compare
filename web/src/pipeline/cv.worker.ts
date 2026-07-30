@@ -35,6 +35,13 @@ let pendingOcr: ((words: OcrWords | null) => void) | null = null;
 // 튀어나오는 경우가 있어("120" 같은 값), 어디서 터졌는지를 함께 알려준다.
 let lastStage = "시작";
 
+// wasm 힙 사용량(MB) — opencv.js는 자기 힙 안에서만 Mat을 잡으므로, 이 값이
+// 한계에 닿으면 bad_alloc이 숫자 예외로 튀어나온다.
+function heapMB(): string {
+  const buf = (ctx.cv as unknown as { HEAPU8?: Uint8Array })?.HEAPU8?.buffer;
+  return buf ? `${(buf.byteLength / 1024 / 1024).toFixed(0)}MB` : "?";
+}
+
 // wasm에서 올라온 예외를 사람이 읽을 수 있는 문장으로.
 function describeError(err: unknown): string {
   const cv = ctx.cv as unknown as
@@ -71,6 +78,9 @@ ctx.onmessage = async (e: MessageEvent) => {
           log: (m) => ctx.postMessage({ type: "log", msg: m }),
           progress: (s) => {
             lastStage = s;
+            // 단계마다 wasm 힙 사용량을 로그에 남긴다 — 대형 라벨에서 메모리
+            // 부족으로 죽을 때 어디서 한계에 닿았는지 사후 추적할 수 있게.
+            ctx.postMessage({ type: "log", msg: `[heap] ${s}: ${heapMB()}` });
             ctx.postMessage({ type: "progress", stage: s });
           },
           onAligned: (rgba, w, h) =>

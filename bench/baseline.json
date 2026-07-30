@@ -1,12 +1,12 @@
 {
   "records": {
     "python/benign-blur_noise": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 0,
-      "elapsed_s": 14.2,
+      "elapsed_s": 14.0,
       "findings_total": 0,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -27,12 +27,12 @@
       "unlabeled": []
     },
     "python/benign-combo": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 0,
-      "elapsed_s": 14.9,
+      "elapsed_s": 14.6,
       "findings_total": 1,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -53,12 +53,12 @@
       "unlabeled": []
     },
     "python/benign-jpeg": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 0,
-      "elapsed_s": 13.3,
+      "elapsed_s": 13.1,
       "findings_total": 0,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -79,12 +79,12 @@
       "unlabeled": []
     },
     "python/benign-shift_rotate": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 0,
-      "elapsed_s": 12.9,
+      "elapsed_s": 13.0,
       "findings_total": 1,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -105,12 +105,12 @@
       "unlabeled": []
     },
     "python/benign-tone_down": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 0,
       "elapsed_s": 12.9,
       "findings_total": 0,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -131,12 +131,12 @@
       "unlabeled": []
     },
     "python/identity-artwork": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 0,
       "elapsed_s": 12.8,
       "findings_total": 0,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -157,12 +157,12 @@
       "unlabeled": []
     },
     "python/identity-scan": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 0,
       "elapsed_s": 12.8,
       "findings_total": 0,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -183,12 +183,12 @@
       "unlabeled": []
     },
     "python/inject-erase_char-clean": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 2,
-      "elapsed_s": 12.8,
+      "elapsed_s": 12.9,
       "findings_total": 2,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -211,12 +211,12 @@
       "unlabeled": []
     },
     "python/inject-erase_char-degraded": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 2,
       "elapsed_s": 13.9,
       "findings_total": 2,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -239,12 +239,12 @@
       "unlabeled": []
     },
     "python/inject-erase_line-clean": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 2,
       "elapsed_s": 12.9,
       "findings_total": 2,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -267,12 +267,12 @@
       "unlabeled": []
     },
     "python/inject-erase_line-degraded": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 2,
-      "elapsed_s": 14.0,
+      "elapsed_s": 13.9,
       "findings_total": 2,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -295,12 +295,12 @@
       "unlabeled": []
     },
     "python/inject-erase_period-clean": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 0,
       "elapsed_s": 12.8,
       "findings_total": 0,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -321,12 +321,12 @@
       "unlabeled": []
     },
     "python/inject-erase_period-degraded": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 0,
-      "elapsed_s": 13.8,
+      "elapsed_s": 13.9,
       "findings_total": 0,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -347,12 +347,12 @@
       "unlabeled": []
     },
     "python/inject-erase_word-clean": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 2,
-      "elapsed_s": 12.9,
+      "elapsed_s": 12.8,
       "findings_total": 2,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -375,12 +375,12 @@
       "unlabeled": []
     },
     "python/inject-erase_word-degraded": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 2,
       "elapsed_s": 13.9,
       "findings_total": 2,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -403,12 +403,12 @@
       "unlabeled": []
     },
     "python/inject-faded_word-clean": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 5,
       "elapsed_s": 12.9,
       "findings_total": 5,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -431,12 +431,12 @@
       "unlabeled": []
     },
     "python/inject-faded_word-degraded": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 5,
       "elapsed_s": 14.0,
       "findings_total": 5,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -459,12 +459,12 @@
       "unlabeled": []
     },
     "python/inject-fill_glyph-clean": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 2,
-      "elapsed_s": 12.8,
+      "elapsed_s": 12.9,
       "findings_total": 2,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -487,12 +487,12 @@
       "unlabeled": []
     },
     "python/inject-fill_glyph-degraded": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 2,
-      "elapsed_s": 13.9,
+      "elapsed_s": 14.0,
       "findings_total": 2,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -515,12 +515,12 @@
       "unlabeled": []
     },
     "python/inject-shift_block-clean": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 2,
-      "elapsed_s": 12.8,
+      "elapsed_s": 12.9,
       "findings_total": 2,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -543,12 +543,12 @@
       "unlabeled": []
     },
     "python/inject-shift_block-degraded": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 2,
       "elapsed_s": 13.9,
       "findings_total": 2,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -571,12 +571,12 @@
       "unlabeled": []
     },
     "python/inject-spot_near_text-clean": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 1,
-      "elapsed_s": 12.8,
+      "elapsed_s": 12.9,
       "findings_total": 1,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -599,12 +599,12 @@
       "unlabeled": []
     },
     "python/inject-spot_near_text-degraded": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 1,
-      "elapsed_s": 13.9,
+      "elapsed_s": 14.0,
       "findings_total": 1,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -627,12 +627,12 @@
       "unlabeled": []
     },
     "python/inject-spot_small-clean": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 1,
-      "elapsed_s": 13.2,
+      "elapsed_s": 12.8,
       "findings_total": 1,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -655,12 +655,12 @@
       "unlabeled": []
     },
     "python/inject-spot_small-degraded": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 1,
       "elapsed_s": 13.9,
       "findings_total": 1,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -683,12 +683,12 @@
       "unlabeled": []
     },
     "python/inject-spot_tiny-clean": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 1,
-      "elapsed_s": 13.1,
+      "elapsed_s": 13.0,
       "findings_total": 1,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -711,12 +711,12 @@
       "unlabeled": []
     },
     "python/inject-spot_tiny-degraded": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 1,
-      "elapsed_s": 14.3,
+      "elapsed_s": 13.9,
       "findings_total": 1,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -739,12 +739,12 @@
       "unlabeled": []
     },
     "python/inject-thin_stroke-clean": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 0,
       "elapsed_s": 12.8,
       "findings_total": 0,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -765,12 +765,12 @@
       "unlabeled": []
     },
     "python/inject-thin_stroke-degraded": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 0,
       "elapsed_s": 13.9,
       "findings_total": 0,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",
@@ -791,12 +791,12 @@
       "unlabeled": []
     },
     "python/pga1e0398": {
-      "accepted_at": "2026-07-30T19:11:56+09:00",
+      "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 12,
       "elapsed_s": 14.1,
       "findings_total": 24,
       "fingerprint": {
-        "commit": "0039b01",
+        "commit": "f641dcf",
         "config_hash": "153be6f6f779",
         "dirty": true,
         "engine": "python",

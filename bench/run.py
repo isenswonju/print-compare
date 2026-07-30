@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 import traceback
 from pathlib import Path
 
 from . import report as rp
 from .cases import Case, MissingImages, load_cases
+from .crops import drift_items, save_crops
 from .engines import ENGINES, fingerprint, run_engine
 from .score import score
 
@@ -43,7 +45,8 @@ def run_case(case: Case, engine: str, fast: bool, keep: Path | None,
              base: dict, fp: dict) -> dict:
     row: dict = {"case": case.id, "group": case.group, "kind": case.kind,
                  "status": "SKIP", "reason": "", "elapsed": 0.0,
-                 "failures": [], "warnings": [], "score": None, "drift": None}
+                 "failures": [], "warnings": [], "score": None, "drift": None,
+                 "crops": []}
     try:
         ref, test = case.materialize()
     except MissingImages as e:
@@ -101,6 +104,18 @@ def run_case(case: Case, engine: str, fast: bool, keep: Path | None,
             sc.warnings.append(f"환경/설정 변화: {drift.env_changed}")
     else:
         sc.warnings.append("기준선 없음 — 결과를 확인하고 --accept 로 승인하라")
+
+    # 판정이 필요한 항목은 크롭을 남긴다 — 좌표만 있는 리포트는 결국 엔진을
+    # 다시 돌려보게 만든다. 산출물(정합 TEST)은 크롭을 뜬 뒤 정리한다.
+    try:
+        row["crops"] = save_crops(case.id, ref, test, run.artifacts,
+                                  drift_items(sc, drift), rp.OUT_DIR)
+    except Exception as e:                     # 크롭 실패가 게이트를 막지는 않는다
+        row["crops"] = []
+        sc.warnings.append(f"크롭 저장 실패: {e}")
+    finally:
+        if keep is None and run.artifacts:
+            shutil.rmtree(run.artifacts, ignore_errors=True)
 
     sc.ok = not sc.failures
     row["status"] = "PASS" if sc.ok else "FAIL"

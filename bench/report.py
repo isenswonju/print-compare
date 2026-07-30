@@ -130,11 +130,13 @@ def compare_baseline(sc: CaseScore, engine: str, elapsed: float, fp: dict,
     slow = (round(elapsed / prev_elapsed, 2)
             if prev_elapsed and elapsed > prev_elapsed * SLOWDOWN_WARN else None)
 
+    # 커밋 변화는 정상(고칠 때마다 바뀐다)이라 알리지 않는다 — 매번 뜨는 경고는
+    # 아무도 안 읽는다. 기록에는 남기고, 경고는 "결과가 왜 달라졌는지 헷갈리게
+    # 만드는" 변화(임계값·라이브러리 버전)만 낸다.
     env = {}
     pfp = rec.get("fingerprint", {})
-    for k in ("config_hash", "commit"):
-        if pfp.get(k) != fp.get(k):
-            env[k] = f"{pfp.get(k)} → {fp.get(k)}"
+    if pfp.get("config_hash") != fp.get("config_hash"):
+        env["config_hash"] = f"{pfp.get('config_hash')} → {fp.get('config_hash')}"
     if pfp.get("versions") != fp.get("versions"):
         env["versions"] = f"{pfp.get('versions')} → {fp.get('versions')}"
 
@@ -214,12 +216,21 @@ def render(results: list[dict], fp: dict, elapsed_total: float) -> str:
             f"{_fmt_margins(sc.margins())} | {r['elapsed']:.0f}s |")
     lines.append("")
 
+    def crop_links(r: dict) -> list[str]:
+        """판정용 크롭(REF·TEST 나란히). 리포트와 같은 폴더 기준 상대 경로."""
+        if not r.get("crops"):
+            return []
+        out = ["", "판정용 크롭:"]
+        out += [f"  - [{Path(p).stem}]({p})" for p in r["crops"]]
+        return out
+
     if fails:
         lines += ["## ❌ 계약 위반 (머지 불가)", ""]
         for r in fails:
             lines.append(f"### `{r['case']}`")
             for msg in r["failures"]:
                 lines.append(f"- {msg}")
+            lines += crop_links(r)
             lines.append("")
 
     if warns:
@@ -228,6 +239,7 @@ def render(results: list[dict], fp: dict, elapsed_total: float) -> str:
             lines.append(f"### `{r['case']}`")
             for msg in r["warnings"]:
                 lines.append(f"- {msg}")
+            lines += crop_links(r)
             lines.append("")
 
     if skips:
@@ -235,6 +247,20 @@ def render(results: list[dict], fp: dict, elapsed_total: float) -> str:
         for r in skips:
             lines.append(f"- `{r['case']}`: {r['reason']}")
         lines.append("")
+
+    # FAIL/WARN 이 아니어도 예산 안의 오탐은 눈으로 봐야 한다(예산을 줄일지,
+    # forbid 로 굳힐지 판단하는 자리다).
+    rest = [r for r in results
+            if r.get("crops") and r not in fails and r not in warns]
+    if rest:
+        lines += ["## 🔍 예산 안이지만 확인이 필요한 검출", ""]
+        for r in rest:
+            lines.append(f"### `{r['case']}`")
+            for f in r["score"].fps:
+                lines.append(f"- {f['type']}/{f['severity']} {f['bbox']} "
+                             f"마진 {f['margin']} — {f['note']}")
+            lines += crop_links(r)
+            lines.append("")
 
     waived_any = [r for r in results if r.get("score") and
                   (r["score"].waived_found or r["score"].waived_missed)]

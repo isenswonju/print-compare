@@ -175,12 +175,21 @@ def test_no_baseline_returns_none():
     assert compare_baseline(sc, "python", 1.0, {}, {"version": 1, "records": {}}) is None
 
 
-def test_env_change_is_reported():
+def test_threshold_change_is_reported():
     sc = score(labeled(), [], REF_W)
     d = compare_baseline(sc, "python", 10.0,
-                         {"config_hash": "bbb", "commit": "c1"},
+                         {"config_hash": "bbb", "commit": "c0"},
                          base_with(make_record(fp_count=0)))
-    assert "config_hash" in d.env_changed and "commit" in d.env_changed
+    assert "config_hash" in d.env_changed
+
+
+def test_commit_change_alone_is_not_reported():
+    """커밋은 고칠 때마다 바뀐다 — 매번 뜨는 경고는 아무도 읽지 않는다."""
+    sc = score(labeled(), [], REF_W)
+    d = compare_baseline(sc, "python", 10.0,
+                         {"config_hash": "aaa", "commit": "c99"},
+                         base_with(make_record(fp_count=0)))
+    assert not d.env_changed and d.empty
 
 
 def test_slowdown_threshold():
@@ -246,6 +255,49 @@ def test_brief_keeps_margin_and_truncates_note():
     f = finding(1, "extra", (1, 2, 3, 4), margin=1.5, note="가" * 200)
     b = brief(f)
     assert b["margin"] == 1.5 and len(b["note"]) == 60
+
+
+# --------------------------------------------------------------- 판정용 크롭
+def test_crops_pair_ref_and_test(tmp_path):
+    import cv2
+    import numpy as np
+    from bench.crops import drift_items, save_crops
+
+    ref = np.full((400, 600), 255, np.uint8)
+    cv2.rectangle(ref, (100, 100), (160, 160), 0, -1)
+    test = ref.copy()
+    cv2.circle(test, (300, 200), 12, 0, -1)          # TEST에만 있는 잉크
+    cv2.imwrite(str(tmp_path / "ref.png"), ref)
+    cv2.imwrite(str(tmp_path / "test.png"), test)
+
+    case = labeled(fp_budget=1)
+    sc = score(case, [finding(1, "extra", (288, 188, 24, 24))], REF_W)
+    items = drift_items(sc, None)
+    assert len(items) == 1 and items[0]["tag"] == "오탐"
+
+    saved = save_crops("t", tmp_path / "ref.png", tmp_path / "test.png", None,
+                       items, tmp_path / "out")
+    assert saved == ["crops/t/오탐-1.png"]
+    img = cv2.imread(str(tmp_path / "out" / saved[0]), cv2.IMREAD_GRAYSCALE)
+    assert img is not None and img.shape[1] > 24 * 2, "REF·TEST가 나란히 붙어야 한다"
+
+
+def test_crops_are_capped_and_deduped(tmp_path):
+    import cv2
+    import numpy as np
+    from bench.crops import save_crops
+    img = np.full((400, 600), 255, np.uint8)
+    cv2.imwrite(str(tmp_path / "a.png"), img)
+    items = [{"tag": "오탐", "bbox": [10, 10, 5, 5]} for _ in range(30)]
+    saved = save_crops("t", tmp_path / "a.png", tmp_path / "a.png", None, items,
+                       tmp_path / "out", limit=12)
+    assert len(saved) == 12
+
+
+def test_crops_skip_when_nothing_to_judge(tmp_path):
+    from bench.crops import save_crops
+    assert save_crops("t", tmp_path / "없음.png", tmp_path / "없음.png", None,
+                      [], tmp_path / "out") == []
 
 
 # --------------------------------------------------- 피드백 → 케이스 변환

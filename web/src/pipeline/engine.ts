@@ -57,6 +57,10 @@ export async function runPipeline(
     cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(kw, kh));
 
   // RGBA {data,width,height} → GRAY Mat
+  // 주의: 픽셀당 4바이트인 RGBA Mat이 잠깐 필요하다(48MP에서 184MB). JS로 직접
+  // 회색 변환하면 이 버퍼를 없앨 수 있는데, opencv.js의 cvtColor는 내부 경로의
+  // 라운딩이 달라 결과가 0.2%가량 ±1씩 어긋난다(검증함) — 검출 결과를 바꾸므로
+  // 쓰지 않는다. 이 버퍼는 변환 직후 해제되어 뒤 단계 피크에는 남지 않는다.
   function toGray(img: ImageDataLike): Mat {
     const rgba = new cv.Mat(img.height, img.width, cv.CV_8UC4);
     rgba.data.set(img.data);
@@ -124,26 +128,32 @@ export async function runPipeline(
   ts = now();
   progress("구조 diff");
   const k = ellipse(tol);
-  const open3 = ellipse(3);
   const rawExtra = andNotDilated(cv, testInk, refInk, k);
   const rawMissing = andNotDilated(cv, refInk, testInk, k);
-  const extra = new cv.Mat(), missing = new cv.Mat();
-  cv.morphologyEx(rawExtra, extra, cv.MORPH_OPEN, open3);
-  cv.morphologyEx(rawMissing, missing, cv.MORPH_OPEN, open3);
-  k.delete(); open3.delete();
+  k.delete();
   mark("diff", ts);
 
   // ---------------------------------------------------------------- 3.5 군집화
   ts = now();
   progress("군집화");
   const cbox = contentBBoxOf(cv, refInk);
-  let extraComps = clusterComponents(cv, extra, rawExtra, normTest,
-                                     cfg.extraMaxNorm, cfg, ref, cbox, rectK);
-  let missingComps = clusterComponents(cv, missing, rawMissing, ref,
-                                       cfg.missingMaxRef, cfg, ref, cbox, rectK);
-  // open()한 마스크는 군집화까지만 쓴다 — 여기서 놓아준다(각 46MB).
-  // 원시 마스크(rawExtra/rawMissing)는 바로 아래 리플로우 검사가 아직 쓴다.
-  extra.delete(); missing.delete();
+  // extra와 missing은 서로 독립이라 한 번에 하나만 들고 있으면 된다. open() 결과
+  // 두 장을 동시에 살려두면 군집화 피크(연결성분 라벨 = 픽셀당 4바이트)와 겹쳐
+  // 대형 라벨에서 1GB 힙을 넘긴다. 만들고 → 쓰고 → 즉시 버린다.
+  const open3 = ellipse(3);
+  const clusterOpened = (raw: Mat, graySrc: Mat, maxGray: number): Comp[] => {
+    const opened = new cv.Mat();
+    cv.morphologyEx(raw, opened, cv.MORPH_OPEN, open3);
+    try {
+      return clusterComponents(cv, opened, raw, graySrc, maxGray, cfg, ref,
+                               cbox, rectK);
+    } finally {
+      opened.delete();
+    }
+  };
+  let extraComps = clusterOpened(rawExtra, normTest, cfg.extraMaxNorm);
+  let missingComps = clusterOpened(rawMissing, ref, cfg.missingMaxRef);
+  open3.delete();
   mark("군집화", ts);
 
   // ---------------------------------------------------------------- 3.5b 리플로우 억제
@@ -658,12 +668,13 @@ function inkMask(cv: CV, gray: Mat, cfg: PipelineConfig): Mat {
 // 3.4 구조 diff
 // --------------------------------------------------------------------------
 function andNotDilated(cv: CV, a: Mat, b: Mat, kernel: Mat): Mat {
-  // a AND NOT dilate(b)
-  const dil = new cv.Mat(), inv = new cv.Mat(), out = new cv.Mat();
+  // a AND NOT dilate(b). 반전은 제자리로 처리해 전체 크기 임시 버퍼를 하나 줄인다
+  // (원소별 연산이라 src==dst가 안전하다).
+  const dil = new cv.Mat(), out = new cv.Mat();
   cv.dilate(b, dil, kernel);
-  cv.bitwise_not(dil, inv);
-  cv.bitwise_and(a, inv, out);
-  dil.delete(); inv.delete();
+  cv.bitwise_not(dil, dil);
+  cv.bitwise_and(a, dil, out);
+  dil.delete();
   return out;
 }
 

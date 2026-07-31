@@ -790,6 +790,58 @@
       ],
       "unlabeled": []
     },
+    "python/lib-38d5f92a-ref-combo": {
+      "accepted_at": "2026-07-31T12:28:36+09:00",
+      "defects_total": 0,
+      "elapsed_s": 24.5,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "2ce5ee7",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "python/lib-38d5f92a-ref-identity": {
+      "accepted_at": "2026-07-31T12:28:36+09:00",
+      "defects_total": 0,
+      "elapsed_s": 23.1,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "2ce5ee7",
+        "config_hash": "153be6f6f779",
+        "dirty": true,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
     "python/pga1e0398": {
       "accepted_at": "2026-07-30T19:39:42+09:00",
       "defects_total": 12,
@@ -1584,6 +1636,56 @@
       "findings_total": 0,
       "fingerprint": {
         "commit": "e7a6055",
+        "config_hash": "17f2a582a8dc",
+        "dirty": true,
+        "engine": "web",
+        "os": "Darwin arm64",
+        "versions": {
+          "node": "v26.0.0",
+          "opencv-js": "^4.10.0-release.1",
+          "tesseract.js": "^5.1.1"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "web/lib-38d5f92a-ref-combo": {
+      "accepted_at": "2026-07-31T12:31:14+09:00",
+      "defects_total": 0,
+      "elapsed_s": 80.8,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "2ce5ee7",
+        "config_hash": "17f2a582a8dc",
+        "dirty": true,
+        "engine": "web",
+        "os": "Darwin arm64",
+        "versions": {
+          "node": "v26.0.0",
+          "opencv-js": "^4.10.0-release.1",
+          "tesseract.js": "^5.1.1"
+        }
+      },
+      "fp_count": 0,
+      "margins": {},
+      "recall": [
+        0,
+        0
+      ],
+      "unlabeled": []
+    },
+    "web/lib-38d5f92a-ref-identity": {
+      "accepted_at": "2026-07-31T12:31:14+09:00",
+      "defects_total": 0,
+      "elapsed_s": 76.8,
+      "findings_total": 0,
+      "fingerprint": {
+        "commit": "2ce5ee7",
         "config_hash": "17f2a582a8dc",
         "dirty": true,
         "engine": "web",

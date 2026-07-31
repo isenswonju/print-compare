@@ -92,6 +92,37 @@ def from_server(url: str, password: str, limit: int) -> list[tuple[str, bytes]]:
 # 케이스 만들기
 # ---------------------------------------------------------------------------
 
+MIN_SIDE = 400          # 이보다 작은 그림은 아트웍이 아니다(개발용 더미 등)
+
+
+def corpus_hashes() -> dict[str, str]:
+    """이미 케이스가 쓰고 있는 이미지들의 내용 해시 → 케이스 id.
+
+    보관함에는 우리 픽스처와 같은 파일이 올라와 있을 수 있다. 같은 그림으로
+    케이스를 하나 더 만들면 실행 시간만 두 배가 된다.
+    """
+    out: dict[str, str] = {}
+    for f in sorted(CASE_DIR.glob("*.json")):
+        data = json.loads(f.read_text(encoding="utf-8"))
+        for case in (data if isinstance(data, list) else [data]):
+            for key in ("base", "ref", "test"):
+                rel = case.get("source", {}).get(key)
+                if not rel:
+                    continue
+                path = ROOT / rel
+                if path.exists():
+                    out.setdefault(
+                        hashlib.sha256(path.read_bytes()).hexdigest(), case["id"])
+    return out
+
+
+def looks_like_artwork(raw: bytes, name: str) -> bool:
+    """개발용 더미(수십 바이트)나 깨진 파일을 케이스로 만들지 않는다."""
+    if len(raw) < 50_000 and not name.lower().endswith(".pdf"):
+        return False
+    return True
+
+
 def to_png(name: str, raw: bytes, dest: Path) -> bool:
     """PDF·JPG 등 무엇이 오든 벤치가 읽을 수 있는 PNG 한 장으로 만든다."""
     from compare_artwork import imread_gray
@@ -156,9 +187,26 @@ def main(argv=None) -> int:
         return 0
 
     recipes = [r.strip() for r in args.recipes.split(",") if r.strip()]
+    known = corpus_hashes()
+    seen: set[str] = set()
     made = skipped = flagged = 0
     for name, raw in items:
-        digest = hashlib.sha256(raw).hexdigest()[:8]
+        full = hashlib.sha256(raw).hexdigest()
+        if not looks_like_artwork(raw, name):
+            print(f"⏭  아트웍이 아닌 파일 건너뜀: {name} ({len(raw)}바이트 — "
+                  f"개발용 더미로 보인다)")
+            skipped += 1
+            continue
+        if full in seen:
+            print(f"⏭  같은 내용 중복: {name}")
+            skipped += 1
+            continue
+        seen.add(full)
+        if full in known:
+            print(f"⏭  이미 케이스가 쓰는 그림: {name} → {known[full]}")
+            skipped += 1
+            continue
+        digest = full[:8]
         case_id = f"lib-{digest}-{slug(Path(name).stem)}"
         path = CASE_DIR / f"{case_id}.json"
         img_rel = f"private/bench-cases/{case_id}/BASE.png"

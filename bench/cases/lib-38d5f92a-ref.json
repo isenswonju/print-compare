@@ -1,0 +1,23 @@
+[
+  {
+    "id": "lib-38d5f92a-ref-identity",
+    "kind": "identity",
+    "group": "guard",
+    "fp_budget": 0,
+    "source": {
+      "base": "private/bench-cases/lib-38d5f92a-ref/BASE.png"
+    },
+    "note": "사용자 업로드 아트웍 자기비교 — 결함 0건이 정답. 7275x6614 · 회색 톤 7.6% · 큰 솔리드 잉크 없음"
+  },
+  {
+    "id": "lib-38d5f92a-ref-combo",
+    "kind": "benign",
+    "group": "guard",
+    "fp_budget": 0,
+    "source": {
+      "base": "private/bench-cases/lib-38d5f92a-ref/BASE.png",
+      "recipe": "combo"
+    },
+    "note": "사용자 업로드 아트웍 열화(combo) — 결함 0건이 정답. 7275x6614 · 회색 톤 7.6% · 큰 솔리드 잉크 없음"
+  }
+]

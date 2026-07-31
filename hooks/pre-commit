@@ -1,0 +1,41 @@
+#!/bin/sh
+# 커밋 전 정확도 안전망 — 엔진을 건드린 커밋만 30초짜리 오탐 감시를 돌린다.
+#
+# 켜는 법(클론당 1회):  git config core.hooksPath hooks
+# 끄고 한 번만 넘기기:   git commit --no-verify
+#
+# 여기서 도는 것은 guard 셋(identity·benign) + OCR 끔 = 약 30초다. 전체 게이트
+# (라벨 계약·미검출·마진)는 `python3 -m bench.run`으로 따로 돌린다 — 6.5분이라
+# 커밋마다 돌리면 아무도 커밋을 안 하게 된다.
+set -e
+
+# 엔진/케이스와 무관한 커밋(문서·설정 등)은 건너뛴다.
+CHANGED=$(git diff --cached --name-only)
+if ! printf '%s\n' "$CHANGED" | grep -qE '^(compare_artwork\.py|web/src/pipeline/|bench/)'; then
+  exit 0
+fi
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "pre-commit: python3 이 없어 안전망을 건너뛴다" >&2
+  exit 0
+fi
+if ! python3 -c "import cv2" >/dev/null 2>&1; then
+  echo "pre-commit: opencv 가 없어 안전망을 건너뛴다 (pip install opencv-python-headless)" >&2
+  exit 0
+fi
+
+echo "pre-commit: 정확도 안전망(guard, OCR 끔) 실행 — 약 30초"
+# 이력은 남기지 않는다: 커밋 전 상태는 커밋된 코드가 아니라 매번 같은 줄만 쌓인다.
+if ! python3 -m bench.run --fast --group guard --no-history; then
+  cat >&2 <<'MSG'
+
+pre-commit: ❌ 정확도 안전망이 막았다.
+  · 무엇이 깨졌는지: bench/out/report.md (판정용 크롭 링크 포함)
+  · 의도한 변경이라면 결과를 확인한 뒤 `python3 -m bench.run --accept`로 기준선을 올리고 다시 커밋
+  · 정말 그냥 넘기려면 `git commit --no-verify` (원장에 이유를 남길 것)
+MSG
+  exit 1
+fi

@@ -249,6 +249,21 @@ python -m bench.run --accept          # 결과를 확인한 뒤 기준선으로 
 python -m bench.import_feedback       # 피드백 → 케이스 자동 생성
 ```
 
+### 커밋마다 자동 실행 (권장)
+
+```bash
+git config core.hooksPath hooks      # 클론당 1회
+```
+
+`hooks/pre-commit`이 **엔진·케이스를 건드린 커밋에서만** guard 셋을 OCR 없이
+돌린다(약 30초). 문서·설정만 바꾼 커밋은 그냥 통과한다. 막히면
+`bench/out/report.md`에 무엇이 깨졌는지와 판정용 크롭이 있고, 의도한 변경이면
+`--accept`로 기준선을 올린 뒤 다시 커밋한다. 정말 넘겨야 하면
+`git commit --no-verify`(대신 이유를 남길 것).
+
+전체 게이트(라벨 계약·미검출·마진)는 6.5분이라 커밋마다 돌리지 않는다 —
+배포 전이나 엔진을 손본 뒤 `python -m bench.run`으로 따로 돌린다.
+
 ### 2층 구조 — 왜 "이전 결과와의 비교"만으로는 안 되는가
 
 이전 엔진의 출력에는 오탐이 섞여 있다(그래서 튜닝한다). 그걸 정답으로 굳히면

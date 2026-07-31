@@ -272,6 +272,89 @@ def test_brief_keeps_margin_and_truncates_note():
     assert b["margin"] == 1.5 and len(b["note"]) == 60
 
 
+# ------------------------------------------- 아트웍 진단 · 업로드 원본 자동 케이스
+def make_artwork(tmp_path, solid=False):
+    import cv2
+    import numpy as np
+    img = np.full((900, 1200), 255, np.uint8)
+    for r in range(6):                       # 본문 글자(획 폭 10px 남짓)
+        for c in range(10):
+            x, y = 60 + c * 110, 60 + r * 120
+            cv2.rectangle(img, (x, y), (x + 70, y + 60), 0, 4)
+    if solid:                                # 평탄화 커널(81)보다 두꺼운 검정 바
+        cv2.rectangle(img, (200, 700), (900, 860), 0, -1)
+    path = tmp_path / ("solid.png" if solid else "text.png")
+    cv2.imwrite(str(path), img)
+    return path
+
+
+def test_profile_records_solid_ink_and_gray_tone(tmp_path):
+    from bench.artwork import profile, profile_note
+    thin = profile(make_artwork(tmp_path, solid=False))
+    assert thin["solid_px"] == 0 and thin["ink_px"] > 0
+    assert "큰 솔리드 잉크 없음" in profile_note(thin)
+
+    thick = profile(make_artwork(tmp_path, solid=True))
+    assert thick["solid_px"] > 0, "커널보다 두꺼운 덩어리를 재야 한다"
+    assert thick["solid_bbox"] and thick["solid_bbox"][2] > 100
+    assert "농도 검사는 이 영역을 보지 않는다" in profile_note(thick)
+
+
+@pytest.fixture
+def library(tmp_path, monkeypatch):
+    from bench import import_library as lib
+    monkeypatch.setattr(lib, "CASE_DIR", tmp_path / "cases")
+    monkeypatch.setattr(lib, "IMAGE_DIR", tmp_path / "images")
+    (tmp_path / "cases").mkdir()
+    src = tmp_path / "원본"
+    src.mkdir()
+    make_artwork(src, solid=False)
+    make_artwork(src, solid=True)
+    return lib, src, tmp_path
+
+
+def test_library_import_makes_zero_label_cases(library):
+    lib, src, tmp = library
+    assert lib.main(["--dir", str(src)]) == 0
+    files = sorted((tmp / "cases").glob("*.json"))
+    assert len(files) == 2, "원본 하나당 케이스 파일 하나"
+    cases = json.loads(files[0].read_text(encoding="utf-8"))
+    kinds = {c["kind"] for c in cases}
+    assert kinds == {"identity", "benign"}
+    for c in cases:
+        assert c["group"] == "guard" and c["fp_budget"] == 0
+        assert "must_find" not in c, "라벨이 필요 없는 케이스여야 한다"
+        assert c["source"]["base"].startswith("private/bench-cases/")
+
+
+def test_library_import_records_artwork_profile_in_note(library):
+    lib, src, tmp = library
+    lib.main(["--dir", str(src)])
+    notes = " ".join(json.dumps(json.loads(p.read_text(encoding="utf-8")),
+                                ensure_ascii=False)
+                     for p in (tmp / "cases").glob("*.json"))
+    assert "큰 솔리드 잉크 없음" in notes
+    assert "농도 검사는 이 영역을 보지 않는다" in notes, \
+        "큰 솔리드 영역이 있는 원본은 그 사실이 note 에 남아야 한다"
+
+
+def test_library_import_is_idempotent(library):
+    lib, src, tmp = library
+    lib.main(["--dir", str(src)])
+    before = {p.name: p.read_text(encoding="utf-8")
+              for p in (tmp / "cases").glob("*.json")}
+    lib.main(["--dir", str(src)])             # 같은 원본 재수입
+    after = {p.name: p.read_text(encoding="utf-8")
+             for p in (tmp / "cases").glob("*.json")}
+    assert before == after
+
+
+def test_library_dry_run_writes_nothing(library):
+    lib, src, tmp = library
+    lib.main(["--dir", str(src), "--dry-run"])
+    assert not list((tmp / "cases").glob("*.json"))
+
+
 # --------------------------------------------------------------- 판정용 크롭
 def test_crops_pair_ref_and_test(tmp_path):
     import cv2

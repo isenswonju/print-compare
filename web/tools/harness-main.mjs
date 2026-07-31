@@ -74,6 +74,10 @@ export async function main(cv) {
       await wk.terminate();
       const testWords = wordsFromTesseract(data, defaultConfig.ocrMinConf);
       const refWords = await refWordsPromise;
+      // OCR 오탐 추적용 — Python(pytesseract) 단어 목록과 대조할 때 쓴다.
+      if (process.env.DUMP_WORDS)
+        writeFileSync(process.env.DUMP_WORDS,
+                      JSON.stringify({ refWords, testWords }, null, 1));
       return { refWords, testWords };
     };
   }

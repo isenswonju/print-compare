@@ -892,12 +892,12 @@
       "unlabeled": []
     },
     "web/pga1e0398": {
-      "accepted_at": "2026-07-30T19:42:12+09:00",
-      "defects_total": 15,
-      "elapsed_s": 49.8,
-      "findings_total": 27,
+      "accepted_at": "2026-07-31T09:59:42+09:00",
+      "defects_total": 14,
+      "elapsed_s": 51.1,
+      "findings_total": 26,
       "fingerprint": {
-        "commit": "4d0d470",
+        "commit": "1987708",
         "config_hash": "17f2a582a8dc",
         "dirty": true,
         "engine": "web",
@@ -908,7 +908,7 @@
           "tesseract.js": "^5.1.1"
         }
       },
-      "fp_count": 2,
+      "fp_count": 1,
       "margins": {
         "1": 10.075,
         "2": 4.65,
@@ -938,20 +938,6 @@
           "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
           "severity": "major",
           "type": "extra"
-        },
-        {
-          "area_px": 736,
-          "bbox": [
-            1348,
-            5977,
-            23,
-            32
-          ],
-          "id": 8,
-          "margin": null,
-          "note": "OCR 불일치: 'Owner's' → 's'",
-          "severity": "critical",
-          "type": "text_mismatch"
         }
       ]
     }

@@ -7,7 +7,7 @@
     "test": "tests/fixtures/PGA1E0398_TEST.png"
   },
   "fp_budget": 5,
-  "note": "실물 회귀 픽스처. 라벨 출처는 지시서 §5 표(#2·#5는 실측 교정) — tests/test_fixture.py 와 동일한 계약. min_area 60→40 결정에 쓰였으므로 tune 셋. 기준선 오탐이 python 1건 / web 2건인 이유: web(tesseract.js)만 'Owner's'를 's'로 오독해 text_mismatch를 하나 더 낸다(2026-07-30 실측, 미해결)",
+  "note": "실물 회귀 픽스처. 라벨 출처는 지시서 §5 표(#2·#5는 실측 교정) — tests/test_fixture.py 와 동일한 계약. min_area 60→40 결정에 쓰였으므로 tune 셋. 기준선 오탐 1건(글자에 붙은 미세 extra)은 python·web 동일. web에만 있던 OCR 오탐('Owner's'→'s')은 2026-07-31 단어 조각 규칙으로 해결",
   "must_find": [
     { "id": "1", "types": ["extra"], "bbox": [1520, 670, 200, 170], "note": "잉크 스팟" },
     { "id": "2", "types": ["extra", "text_mismatch"], "bbox": [4900, 700, 100, 60],

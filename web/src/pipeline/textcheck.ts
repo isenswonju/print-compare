@@ -51,6 +51,16 @@ export function trivialDiff(tag: string, aWords: string[], bWords: string[]): bo
       translateConfusable(bJoin.toLowerCase())) return true;
   if ((tag === "insert" || tag === "delete") &&
       (alnum(aJoin) + alnum(bJoin)).length < 4) return true;
+  // 단어 조각 오독 — 한쪽이 다른 쪽의 부분 문자열인 1~2자 조각이면 인쇄 결함이
+  // 아니라 판독 실패다. 뒷비침·저대비가 겹친 줄에서 OCR이 단어 앞부분을 놓치고
+  // 끝 글자만 남기는 일이 있다(실측: tesseract.js가 "Owner's"를 "s"로만 읽어
+  // 이 엔진에만 오탐이 났다). 단어가 실제로 지워졌다면 잉크 diff가 훨씬 큰
+  // 면적으로 잡는다.
+  if (tag === "replace") {
+    const aN = alnum(aJoin).toLowerCase(), bN = alnum(bJoin).toLowerCase();
+    const [short, long] = aN.length <= bN.length ? [aN, bN] : [bN, aN];
+    if (short.length > 0 && short.length <= 2 && long.includes(short)) return true;
+  }
   return false;
 }
 

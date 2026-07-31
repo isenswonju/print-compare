@@ -32,10 +32,16 @@ def pick(cases: list[Case], only: str | None, group: str) -> list[Case]:
     if group != "all":
         out = [c for c in out if c.group == group]
     if only:
+        # 정확한 id, `benign` 같은 접두사, `lib-` 처럼 하이픈으로 끝나는 접두사
         want = {s.strip() for s in only.split(",") if s.strip()}
-        out = [c for c in out
-               if c.id in want or any(c.id.startswith(w + "-") for w in want)]
-        missing = want - {c.id for c in out} - {c.id.split("-")[0] for c in out}
+
+        def wanted(cid: str) -> set[str]:
+            return {w for w in want
+                    if cid == w or cid.startswith(w + "-")
+                    or (w.endswith("-") and cid.startswith(w))}
+
+        out = [c for c in out if wanted(c.id)]
+        missing = want - {w for c in out for w in wanted(c.id)}
         if missing:
             raise SystemExit(f"그런 케이스가 없다: {', '.join(sorted(missing))}")
     return out

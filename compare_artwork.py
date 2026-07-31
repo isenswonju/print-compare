@@ -703,6 +703,17 @@ def _trivial_diff(tag: str, a_words: list[str], b_words: list[str]) -> bool:
     # 삽입/삭제는 실단어 수준(영숫자 4자 이상)만 결함으로 인정
     if tag in ("insert", "delete") and len(_alnum(a_join) + _alnum(b_join)) < 4:
         return True
+    # 단어 조각 오독 — 한쪽이 다른 쪽의 부분 문자열인 1~2자 조각이면 인쇄 결함이
+    # 아니라 판독 실패다. 뒷비침·저대비가 겹친 줄에서 OCR이 단어 앞부분을 놓치고
+    # 끝 글자만 남기는 일이 있다(실측: tesseract.js가 "Owner's"를 "s"로만 읽어
+    # web 엔진에만 text_mismatch 오탐이 났다. 네이티브 tesseract는 정상 판독).
+    # 단어가 실제로 지워진 결함이라면 잉크 diff가 훨씬 큰 면적으로 잡는다
+    # (미검출 가혹 테스트 erase_word: 200×45로 검출됨).
+    if tag == "replace":
+        a_n, b_n = _alnum(a_join).lower(), _alnum(b_join).lower()
+        short, long_ = sorted((a_n, b_n), key=len)
+        if 0 < len(short) <= 2 and short in long_:
+            return True
     return False
 
 

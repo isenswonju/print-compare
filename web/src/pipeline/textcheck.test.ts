@@ -32,6 +32,17 @@ describe("trivialDiff", () => {
   it("실제 단어 교체는 trivial 아님", () => {
     expect(trivialDiff("replace", ["hello"], ["world"])).toBe(false);
   });
+  it("단어 조각 오독(부분 문자열 1~2자)은 trivial", () => {
+    // 실측: 뒷비침이 겹친 줄에서 tesseract.js가 "Owner's"를 "s"로만 읽었다
+    expect(trivialDiff("replace", ["Owner's"], ["s"])).toBe(true);
+    expect(trivialDiff("replace", ["le"], ["Sample"])).toBe(true);
+  });
+  it("조각이라도 상대 단어에 없는 글자면 trivial 아님", () => {
+    expect(trivialDiff("replace", ["Owner's"], ["x"])).toBe(false);
+  });
+  it("3자 이상 조각은 trivial 아님(단어가 지워졌을 수 있다)", () => {
+    expect(trivialDiff("replace", ["Sample"], ["Sam"])).toBe(false);
+  });
   it("긴 삽입은 trivial 아님", () => {
     expect(trivialDiff("insert", [], ["humidity"])).toBe(false);
   });

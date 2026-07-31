@@ -29,6 +29,7 @@ import urllib.request
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 from .artwork import profile, profile_note
 from .cases import ROOT
@@ -117,10 +118,18 @@ def corpus_hashes() -> dict[str, str]:
 
 
 def looks_like_artwork(raw: bytes, name: str) -> bool:
-    """개발용 더미(수십 바이트)나 깨진 파일을 케이스로 만들지 않는다."""
-    if len(raw) < 50_000 and not name.lower().endswith(".pdf"):
+    """개발용 더미나 깨진 파일을 케이스로 만들지 않는다.
+
+    바이트 수가 아니라 **디코딩한 크기**로 판단한다 — 흰 바탕 라벨은 압축이 잘
+    돼 파일이 작을 수 있다. 실측: 보관함에 69바이트짜리 더미('hashProd1')가
+    올라와 있었다.
+    """
+    if name.lower().endswith(".pdf"):
+        return len(raw) > 1000
+    img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE)
+    if img is None:
         return False
-    return True
+    return min(img.shape[:2]) >= MIN_SIDE
 
 
 def to_png(name: str, raw: bytes, dest: Path) -> bool:

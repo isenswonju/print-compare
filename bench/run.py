@@ -48,7 +48,7 @@ def pick(cases: list[Case], only: str | None, group: str) -> list[Case]:
 
 
 def run_case(case: Case, engine: str, fast: bool, keep: Path | None,
-             base: dict, fp: dict) -> dict:
+             base: dict, fp: dict, timing: bool = True) -> dict:
     row: dict = {"case": case.id, "group": case.group, "kind": case.kind,
                  "status": "SKIP", "reason": "", "elapsed": 0.0,
                  "failures": [], "warnings": [], "score": None, "drift": None,
@@ -104,7 +104,7 @@ def run_case(case: Case, engine: str, fast: bool, keep: Path | None,
             sc.warnings.append(
                 f"기준선에 있던 검출이 사라짐: {f['type']}/{f['severity']} "
                 f"{f['bbox']} {f['note']}")
-        if drift.slowdown:
+        if drift.slowdown and timing:
             sc.warnings.append(f"실행 시간 {drift.slowdown}배")
         if drift.env_changed:
             sc.warnings.append(f"환경/설정 변화: {drift.env_changed}")
@@ -173,11 +173,22 @@ def main(argv=None) -> int:
                     help="--accept 할 때 FAIL 케이스까지 승인")
     ap.add_argument("--keep", type=Path, help="엔진 산출물을 남길 디렉터리")
     ap.add_argument("--json", type=Path, help="결과를 JSON으로도 저장")
+    ap.add_argument("--no-timing", action="store_true",
+                    help="실행 시간 경고를 끈다 — 예약 실행(launchd)은 우선순위가 "
+                         "달라 늘 1.6배쯤 느려서, 켜두면 경고가 신호를 덮는다")
     ap.add_argument("--no-history", action="store_true",
                     help="이력(history.jsonl)에 남기지 않는다 — 커밋 훅처럼 "
                          "같은 코드를 반복 실행하는 자리에서 쓴다")
     ap.add_argument("--list", action="store_true", help="케이스 목록만 출력")
     args = ap.parse_args(argv)
+
+    # OCR 이 있어야 하는데 없으면 조용히 빠진 채로 채점된다 — 그러면 텍스트
+    # 경로에 걸린 라벨(예: REV 행 critical)이 근거 없이 깨진다. 실측: launchd 는
+    # PATH 가 최소라 tesseract 를 못 찾아 매일 FAIL 이 났다.
+    if args.engine == "python" and not args.fast and not shutil.which("tesseract"):
+        raise SystemExit(
+            "tesseract 가 PATH 에 없다 — OCR 경로가 통째로 빠진 채 채점된다.\n"
+            "  설치: brew install tesseract   /   끄고 돌리려면: --fast")
 
     cases = pick(load_cases(), args.only, args.group)
     if args.list:
@@ -203,7 +214,8 @@ def main(argv=None) -> int:
     for i, case in enumerate(cases, 1):
         print(f"[{i}/{len(cases)}] {case.id} … ", end="", flush=True)
         try:
-            row = run_case(case, args.engine, args.fast, args.keep, base, fp)
+            row = run_case(case, args.engine, args.fast, args.keep, base, fp,
+                           timing=not args.no_timing)
         except KeyboardInterrupt:
             print("\n중단됨 — 여기까지의 결과만 리포트한다.")
             break

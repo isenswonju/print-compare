@@ -264,6 +264,35 @@ git config core.hooksPath hooks      # 클론당 1회
 전체 게이트(라벨 계약·미검출·마진)는 6.5분이라 커밋마다 돌리지 않는다 —
 배포 전이나 엔진을 손본 뒤 `python -m bench.run`으로 따로 돌린다.
 
+### 매일 자동 점검 (launchd)
+
+맥미니에서 **매일 03:10** 에 `bench/sync.py` 가 돈다.
+
+1. 공용 보관함에 새로 올라온 아트웍을 감시 케이스로 들여오고
+2. 전 케이스를 python 엔진으로 점검하고
+3. **새 케이스가 생겼거나 게이트가 깨졌을 때만** 알림을 띄운다
+
+```bash
+cp tools/com.artwork-compare.bench-sync.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.artwork-compare.bench-sync.plist
+launchctl kickstart -k gui/$(id -u)/com.artwork-compare.bench-sync   # 즉시 한 번
+launchctl bootout   gui/$(id -u)/com.artwork-compare.bench-sync      # 끄기
+```
+
+기록은 `bench/out/sync.log`(생성물). **기준선은 자동 승인하지 않는다** — 자동
+갱신하면 안전망이 그냥 로그가 되기 때문에, 사람이 결과를 보고 `--accept` 해야
+한다. 이력(`history.jsonl`)도 남기지 않아 저장소가 매일 더러워지지 않는다.
+새로 생긴 케이스 JSON만 작업 트리에 남는다(검토 후 커밋할 물건).
+실행 시간 경고도 끈다(`--no-timing`) — launchd 는 우선순위가 달라 늘 1.6배쯤
+느려서, 켜두면 경고 32건이 진짜 신호를 덮는다.
+
+보관함 비밀번호는 `private/.library-password`(git 제외)에서 읽는다. 파일이 없으면
+수입만 건너뛰고 점검은 그대로 돈다.
+
+> launchd 작업은 `~/Desktop` 접근이 macOS TCC 로 막혀 있다 — `/bin/sh` 로 스크립트를
+> 실행하면 `Operation not permitted` 로 죽는다. 그래서 서버 에이전트와 같은
+> 바이너리(`/usr/bin/caffeinate` + pyenv python)로 실행한다.
+
 ### 2층 구조 — 왜 "이전 결과와의 비교"만으로는 안 되는가
 
 이전 엔진의 출력에는 오탐이 섞여 있다(그래서 튜닝한다). 그걸 정답으로 굳히면

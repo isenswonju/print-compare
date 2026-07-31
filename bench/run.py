@@ -173,6 +173,9 @@ def main(argv=None) -> int:
                     help="--accept 할 때 FAIL 케이스까지 승인")
     ap.add_argument("--keep", type=Path, help="엔진 산출물을 남길 디렉터리")
     ap.add_argument("--json", type=Path, help="결과를 JSON으로도 저장")
+    ap.add_argument("--no-history", action="store_true",
+                    help="이력(history.jsonl)에 남기지 않는다 — 커밋 훅처럼 "
+                         "같은 코드를 반복 실행하는 자리에서 쓴다")
     ap.add_argument("--list", action="store_true", help="케이스 목록만 출력")
     args = ap.parse_args(argv)
 
@@ -218,11 +221,13 @@ def main(argv=None) -> int:
     console(results)
     text = rp.render(results, fp, total_elapsed)
     path = rp.write_report(text)
-    rows = [rp.history_row(r["score"], args.engine, r["elapsed"], fp, r["group"])
-            for r in results if r.get("score")]
+    rows = ([] if args.no_history else
+            [rp.history_row(r["score"], args.engine, r["elapsed"], fp, r["group"])
+             for r in results if r.get("score")])
     rp.append_history(rows)
-    print(f"\n리포트: {path.relative_to(rp.BENCH.parent)} · "
-          f"이력 {len(rows)}행 → {rp.HISTORY_PATH.relative_to(rp.BENCH.parent)}")
+    print(f"\n리포트: {path.relative_to(rp.BENCH.parent)}" +
+          (" · 이력 남기지 않음(--no-history)" if args.no_history else
+           f" · 이력 {len(rows)}행 → {rp.HISTORY_PATH.relative_to(rp.BENCH.parent)}"))
 
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)

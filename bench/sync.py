@@ -9,7 +9,11 @@
 결과를 보고 `--accept` 해야 한다. 새로 생긴 케이스 JSON만 작업 트리에 남는데,
 그건 검토하고 커밋해야 하는 물건이라 그대로 두는 게 맞다.
 
-수동 실행:  python3 -m bench.sync
+`--if-stale`: 오늘 이미 완주한 이력이 있으면 그냥 통과(0)로 끝낸다. launchd 가
+부팅/로그인 때마다(RunAtLoad) 따라잡기 실행을 걸어도 하루 한 번만 돌게 하는
+가드다 — 이 기계는 03:10에 대개 꺼져 있어 달력 스케줄만으로는 영영 안 돈다.
+
+수동 실행:  python3 -m bench.sync   (가드 없음 — 언제나 돈다)
 """
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ from .cases import CASE_DIR, ROOT
 
 LOG = ROOT / "bench" / "out" / "sync.log"
 PW_FILE = ROOT / "private" / ".library-password"
+STAMP = ROOT / "bench" / "out" / ".last-sync-date"   # 완주한 날짜(YYYY-MM-DD)
 MAX_LOG_LINES = 4000
 
 
@@ -54,6 +59,14 @@ def case_files() -> set[str]:
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    today = datetime.now().strftime("%Y-%m-%d")
+    if "--if-stale" in argv:
+        last = STAMP.read_text(encoding="utf-8").strip() if STAMP.exists() else ""
+        if last == today:
+            log("오늘 이미 점검 완주 — 건너뜀 (--if-stale)")
+            return 0
+
     log("── 시작")
     new_cases: list[str] = []
 
@@ -88,6 +101,9 @@ def main(argv=None) -> int:
         log("게이트 FAIL — bench/out/report.md 확인")
         notify("인쇄 검수 안전망 ❌",
                "정확도 게이트가 깨졌습니다. bench/out/report.md 확인")
+    # 게이트 결과와 무관하게 "오늘 완주" 도장 — FAIL 도 이미 알림을 띄웠으므로
+    # 같은 날 재부팅 때마다 25분짜리 점검을 다시 돌 이유가 없다.
+    STAMP.write_text(today + "\n", encoding="utf-8")
     log("── 끝")
     return rc
 

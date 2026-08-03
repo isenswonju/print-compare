@@ -18,6 +18,8 @@
     <string>/Users/reliability/.pyenv/versions/3.11.9/bin/python3</string>
     <string>-m</string>
     <string>bench.sync</string>
+    <!-- 오늘 이미 완주했으면 즉시 통과 — RunAtLoad 와 짝을 이루는 가드 -->
+    <string>--if-stale</string>
   </array>
   <!-- launchd 의 PATH 는 최소라 tesseract(/opt/homebrew/bin)가 안 보인다.
        그대로 두면 OCR 경로가 통째로 빠진 채 채점돼 결과가 달라진다. -->
@@ -35,9 +37,12 @@
     <key>Minute</key>
     <integer>10</integer>
   </dict>
-  <!-- 03:10에 꺼져 있었다면 켜진 뒤 한 번 따라잡는다 -->
+  <!-- 이 기계는 밤·주말에 꺼져 있어 달력 스케줄(03:10)이 거의 안 걸린다.
+       launchd 는 전원 off 로 놓친 달력 잡을 부팅 후 실행해 주지 않으므로
+       (절전만 따라잡음), 부팅/로그인 때 직접 따라잡는다. --if-stale 가드가
+       하루 한 번으로 눌러 준다. 실측: 3일 연속(8/1~8/3) 미실행이 원인. -->
   <key>RunAtLoad</key>
-  <false/>
+  <true/>
   <key>StandardOutPath</key>
   <string>/Users/reliability/Library/Logs/artwork-compare-bench.log</string>
   <key>StandardErrorPath</key>

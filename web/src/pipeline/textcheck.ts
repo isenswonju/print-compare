@@ -49,6 +49,10 @@ export function trivialDiff(tag: string, aWords: string[], bWords: string[]): bo
   // 마침표는 실제 결함일 수 있어 계속 보고한다.)
   if (translateConfusable(aJoin.toLowerCase()) ===
       translateConfusable(bJoin.toLowerCase())) return true;
+  // rn→m 접합 오독('return'→'retum')은 2자→1자라 문자 치환표로는 못 잡는다
+  const aF = translateConfusable(aJoin.toLowerCase()).replace(/rn/g, "m");
+  const bF = translateConfusable(bJoin.toLowerCase()).replace(/rn/g, "m");
+  if (aF === bF) return true;
   if ((tag === "insert" || tag === "delete") &&
       (alnum(aJoin) + alnum(bJoin)).length < 4) return true;
   // 단어 조각 오독 — 한쪽이 다른 쪽의 부분 문자열인 1~2자 조각이면 인쇄 결함이
@@ -60,6 +64,18 @@ export function trivialDiff(tag: string, aWords: string[], bWords: string[]): bo
     const aN = alnum(aJoin).toLowerCase(), bN = alnum(bJoin).toLowerCase();
     const [short, long] = aN.length <= bN.length ? [aN, bN] : [bN, aN];
     if (short.length > 0 && short.length <= 2 && long.includes(short)) return true;
+    // 한쪽이 다른 쪽에 통째로 들어 있고 차이가 영숫자 1~2자뿐이면 줄 경계
+    // 병합/탈락 오독이다('Strips'→'Strip'). 차이 0자(구두점만: 'blood'→
+    // 'blood.')는 실결함일 수 있어 픽셀 증거(pixelEvidence)로 판정한다.
+    const aNF = alnum(aF), bNF = alnum(bF);
+    const [shortF, longF] = aNF.length <= bNF.length ? [aNF, bNF] : [bNF, aNF];
+    const dLen = longF.length - shortF.length;
+    if (shortF.length > 0 && longF.includes(shortF) &&
+        dLen >= 1 && dLen <= 2) return true;
+    // 여러 단어(3+)가 반토막 이하 텍스트로 붕괴 — 뒷비침·저대비 블록에서
+    // OCR이 줄을 통째로 잘못 묶어 읽은 판독 실패다(실측: 49단어 → '= vil').
+    // 단어가 정말 지워진 결함이라면 잉크 diff가 큰 면적으로 잡는다.
+    if (aWords.length >= 3 && bN.length < 0.5 * aN.length) return true;
   }
   return false;
 }

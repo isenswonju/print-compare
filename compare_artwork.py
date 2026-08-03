@@ -700,6 +700,11 @@ def _trivial_diff(tag: str, a_words: list[str], b_words: list[str]) -> bool:
     if (a_join.lower().translate(_CONFUSABLE)
             == b_join.lower().translate(_CONFUSABLE)):
         return True
+    # rn→m 접합 오독('return'→'retum')은 2자→1자라 translate 로는 못 잡는다
+    a_f = a_join.lower().translate(_CONFUSABLE).replace("rn", "m")
+    b_f = b_join.lower().translate(_CONFUSABLE).replace("rn", "m")
+    if a_f == b_f:
+        return True
     # 삽입/삭제는 실단어 수준(영숫자 4자 이상)만 결함으로 인정
     if tag in ("insert", "delete") and len(_alnum(a_join) + _alnum(b_join)) < 4:
         return True
@@ -713,6 +718,22 @@ def _trivial_diff(tag: str, a_words: list[str], b_words: list[str]) -> bool:
         a_n, b_n = _alnum(a_join).lower(), _alnum(b_join).lower()
         short, long_ = sorted((a_n, b_n), key=len)
         if 0 < len(short) <= 2 and short in long_:
+            return True
+        # 한쪽이 다른 쪽에 통째로 들어 있고 차이가 영숫자 1~2자뿐이면 줄 경계
+        # 병합/탈락 오독이다('Strips'→'Strip', 'retum…results'→'…results e').
+        # 차이 0자(구두점만 다름: 'blood'→'blood.')는 실결함일 수 있으므로
+        # 여기서 거르지 않고 픽셀 증거(pixel_evidence)로 판정한다. 글자가 정말
+        # 지워졌다면 잉크 누락 증거가 단어 박스 안에서 잡히고, 글자가 정말
+        # 추가됐다면 extra 경로가 글리프 면적으로 잡는다.
+        a_nf, b_nf = _alnum(a_f), _alnum(b_f)
+        short_f, long_f = sorted((a_nf, b_nf), key=len)
+        if short_f and short_f in long_f and 1 <= len(long_f) - len(short_f) <= 2:
+            return True
+        # 여러 단어(3+)가 반토막 이하 텍스트로 붕괴 — 뒷비침·저대비 블록에서
+        # OCR이 줄을 통째로 잘못 묶어 읽은 판독 실패다(실측: back-pair TEST-1
+        # 'e Keep test strips …' 49단어 → '= vil'). 단어가 정말 지워진
+        # 결함이라면 잉크 diff가 큰 면적으로 잡는다(bench erase_word/erase_line).
+        if len(a_words) >= 3 and len(b_n) < 0.5 * len(a_n):
             return True
     return False
 
@@ -746,29 +767,58 @@ def text_mismatches(ref_words: list[dict], test_words: list[dict]) -> list[dict]
     return out
 
 
-def pixel_corroborated(mm: dict, ref_ink: np.ndarray, test_ink: np.ndarray,
-                       pad: int = 10) -> bool:
-    """OCR 불일치의 픽셀 증거 대조 — 실제 잉크 차이가 없으면 OCR 오독으로 판정.
+EV_PAD_X = 40        # 단어 곁 추가 잉크(붙은 구두점 등) 탐색 여백
+EV_PAD_Y = 10
+EV_BLOB_MIN = 60     # 증거로 인정할 최소 잉크 덩어리(px)
 
-    - replace: bbox 내 국소 diff(tol=3) 비율 ≥ 5% 필요 (동일 글리프 오독 배제)
-    - delete : TEST에 잉크가 실제로 없어야 함 (망점 영역 OCR 판독 실패 배제)
-    - insert : REF에 잉크가 실제로 없어야 함
+
+def pixel_evidence(mm: dict, ref_ink: np.ndarray,
+                   test_ink: np.ndarray) -> tuple[bool, tuple | None]:
+    """OCR 불일치의 픽셀 증거 대조 — (인정 여부, 증거 덩어리 합집합 bbox).
+
+    종전에는 국소 diff "비율 ≥ 5%"만 요구해, 작은 단어 박스에서는 AA 노이즈
+    몇 px, 큰 박스에서는 뒷비침 질감이 통과했다(오탐 병목). 이제 **뭉친
+    덩어리(blob)** 를 요구한다. 실측(back-pair TEST-1, 2026-08-03 사용자 판정
+    18건): 실결함의 최대 blob ≥ 75px, 오탐(뒷비침·번짐·불릿 오독) ≤ 55px.
+
+    - 추가 잉크(TEST에만): 단어 곁 구두점도 결함이므로 패딩 영역까지 인정
+    - 누락 잉크(REF에만): 사라진 글리프는 단어 박스 **안**에 있어야 한다 —
+      박스 밖 누락은 인접 오염이다(실측: 'Strips'→'Strip' 곁 683px 오탐)
+    - delete/insert: 종전대로 잉크 총량 비(단어 통째 증발/출현)
+    - 반환 bbox는 증거 위치라서 annotated 빨간 박스가 실제 결함 위에 그려진다
+      (종전엔 OCR 단어 박스를 그려 위치가 어긋났다)
     """
     x, y, w, h = mm["bbox"]
     hh, ww = ref_ink.shape
-    x0, y0 = max(x - pad, 0), max(y - pad, 0)
-    x1, y1 = min(x + w + pad, ww), min(y + h + pad, hh)
+    x0, y0 = max(x - EV_PAD_X, 0), max(y - EV_PAD_Y, 0)
+    x1, y1 = min(x + w + EV_PAD_X, ww), min(y + h + EV_PAD_Y, hh)
     r = ref_ink[y0:y1, x0:x1]
     t = test_ink[y0:y1, x0:x1]
-    rn, tn = int(cv2.countNonZero(r)), int(cv2.countNonZero(t))
     if mm["tag"] == "delete":
-        return tn < 0.5 * rn
+        return int(cv2.countNonZero(t)) < 0.5 * int(cv2.countNonZero(r)), None
     if mm["tag"] == "insert":
-        return rn < 0.5 * tn
+        return int(cv2.countNonZero(r)) < 0.5 * int(cv2.countNonZero(t)), None
     k3 = ellipse(3)
-    ev = cv2.countNonZero(cv2.bitwise_and(t, cv2.bitwise_not(cv2.dilate(r, k3)))) \
-       + cv2.countNonZero(cv2.bitwise_and(r, cv2.bitwise_not(cv2.dilate(t, k3))))
-    return ev >= 0.05 * max(rn, 1)
+    added = cv2.bitwise_and(t, cv2.bitwise_not(cv2.dilate(r, k3)))
+    lost = cv2.bitwise_and(r, cv2.bitwise_not(cv2.dilate(t, k3)))
+    boxes = []
+    for mask, need_inside in ((added, False), (lost, True)):
+        n, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        for i in range(1, n):
+            bx, by, bw, bh, area = (int(v) for v in stats[i][:5])
+            if area < EV_BLOB_MIN:
+                continue
+            abs_box = (x0 + bx, y0 + by, bw, bh)
+            if need_inside and not boxes_intersect(abs_box, mm["bbox"]):
+                continue
+            boxes.append(abs_box)
+    if not boxes:
+        return False, None
+    ex0 = min(b[0] for b in boxes)
+    ey0 = min(b[1] for b in boxes)
+    ex1 = max(b[0] + b[2] for b in boxes)
+    ey1 = max(b[1] + b[3] for b in boxes)
+    return True, (ex0, ey0, ex1 - ex0, ey1 - ey0)
 
 
 # ---------------------------------------------------------------------------
@@ -801,11 +851,25 @@ def boxes_intersect(a: tuple, b: tuple) -> bool:
 
 
 def dup_of_text_mismatch(f: Finding, findings: list[Finding]) -> bool:
-    """잉크 diff 결함이 text_mismatch 영역과 겹치면 중복 보고 — 인쇄 오류만 남긴다."""
+    """잉크 diff 결함이 text_mismatch 에 **대부분 포함**되면 중복 보고.
+
+    '조금이라도 겹치면' 강등하던 것을 교차 면적 ≥ 50% 로 좁혔다 — 세로로 긴
+    실결함이 단어 박스와 살짝 겹쳤다고 회색이 되는 오강등이 있었다(실측:
+    back-pair TEST-2, 83x311 잉여 잉크가 'respective' 오독 박스에 먹힘).
+    """
     if f.type not in ("extra", "missing"):
         return False
-    return any(t.type == "text_mismatch" and boxes_intersect(f.bbox_ref, t.bbox_ref)
-               for t in findings)
+    fx, fy, fw, fh = f.bbox_ref
+    farea = max(fw * fh, 1)
+    for t in findings:
+        if t.type != "text_mismatch":
+            continue
+        tx, ty, tw, th = t.bbox_ref
+        ix = max(0, min(fx + fw, tx + tw) - max(fx, tx))
+        iy = max(0, min(fy + fh, ty + th) - max(fy, ty))
+        if ix * iy >= 0.5 * farea:
+            return True
+    return False
 
 
 def ruled_box_mask(ref_ink: np.ndarray) -> np.ndarray:
@@ -1223,7 +1287,8 @@ def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
                   f"({time.time() - t_ocr:.1f}s)")
             rev_lines = line_boxes_with(ref_words, "REV")
             for mm in text_mismatches(ref_words, test_words):
-                if not pixel_corroborated(mm, ref_ink, test_ink):
+                ok, ev_bbox = pixel_evidence(mm, ref_ink, test_ink)
+                if not ok:
                     continue
                 # 리플로우 지역에서는 국소 diff가 커서 픽셀 대조가 무력화됨 —
                 # 동일 글리프가 변위 위치에 있으면 OCR 오독으로 보고 제외
@@ -1234,9 +1299,10 @@ def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
                 if is_reflow(rf_args[0], rf_args[1], mm["bbox"],
                              rf_args[2], rf_args[3]):
                     continue
+                bbox = ev_bbox or mm["bbox"]
                 findings.append(Finding(
-                    type="text_mismatch", bbox_ref=mm["bbox"],
-                    area_px=mm["bbox"][2] * mm["bbox"][3],
+                    type="text_mismatch", bbox_ref=bbox,
+                    area_px=bbox[2] * bbox[3],
                     note=f"OCR 불일치: '{mm['ref_text']}' → '{mm['test_text']}'"))
         except Exception as e:  # tesseract 미설치 등
             print(f"[OCR] 실패({e}) — OCR 경로 생략. --no-ocr 로 경고 억제 가능.")
@@ -1295,8 +1361,11 @@ def main(argv=None):
     ap.add_argument("test", type=Path, help="실물 스캔 PNG (TEST)")
     ap.add_argument("-o", "--outdir", type=Path, required=True, help="출력 디렉토리")
     ap.add_argument("--tol", type=int, default=5, help="diff 팽창 허용치(px), 기본 5")
-    ap.add_argument("--min-area", type=int, default=60,
-                    help="최소 diff 잉크 픽셀 수(REF 폭 5564 기준), 기본 60")
+    # 기본값은 Config.min_area 와 같아야 한다 — 0039b01 에서 엔진 기본을 40으로
+    # 내릴 때 CLI 만 60으로 남아, CLI 실행에서만 소형 결함(70~100px 오염)이
+    # 빠지는 불일치가 있었다(실측: back-pair '10' 오염 87px 미검출).
+    ap.add_argument("--min-area", type=int, default=40,
+                    help="최소 diff 잉크 픽셀 수(REF 폭 5564 기준), 기본 40")
     ap.add_argument("--no-ocr", action="store_true", help="OCR 텍스트 대조 비활성")
     ap.add_argument("--no-tile-refine", action="store_true",
                     help="타일 정밀 정합 생략(폴백 모드, tol=13)")

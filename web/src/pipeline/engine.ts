@@ -333,14 +333,16 @@ export async function runPipeline(
     log(`[OCR] REF ${ocr.refWords.length}단어, TEST ${ocr.testWords.length}단어`);
     revLines = lineBoxesWith(refWords, "REV");
     for (const mm of textMismatches(ocr.refWords, ocr.testWords)) {
-      if (!pixelCorroborated(cv, mm, refInk, testInk, ellipse)) continue;
+      const ev = pixelEvidence(cv, mm, refInk, testInk, ellipse);
+      if (!ev.ok) continue;
       const rfArgs: [Mat, Mat, Mat, Mat] = mm.tag === "delete"
         ? [ref, normTest, refInk, testInkDil]
         : [normTest, ref, testInk, refInkDil];
       if (isReflow(rfArgs[0], rfArgs[1], mm.bbox, rfArgs[2], rfArgs[3])) continue;
+      const bbox = ev.bbox ?? mm.bbox;
       findings.push({
-        type: "text_mismatch", bbox: mm.bbox,
-        area: mm.bbox[2] * mm.bbox[3],
+        type: "text_mismatch", bbox,
+        area: bbox[2] * bbox[3],
         note: `OCR 불일치: '${mm.refText}' → '${mm.testText}'`,
       });
     }
@@ -369,9 +371,18 @@ export async function runPipeline(
   {
     const textBoxes2 = findings
       .filter((f) => f.type === "text_mismatch").map((f) => f.bbox);
-    const isDup = (f: WorkFinding) =>
-      (f.type === "extra" || f.type === "missing") &&
-      textBoxes2.some((t) => boxesIntersect(f.bbox, t));
+    // '조금이라도 겹치면' 중복 강등하던 것을 교차 면적 ≥ 50% 로 좁혔다 —
+    // 세로로 긴 실결함이 단어 박스와 살짝 겹쳤다고 억제되는 오강등이 있었다.
+    const isDup = (f: WorkFinding) => {
+      if (f.type !== "extra" && f.type !== "missing") return false;
+      const [fx, fy, fw, fh] = f.bbox;
+      const farea = Math.max(fw * fh, 1);
+      return textBoxes2.some(([tx, ty, tw, th]) => {
+        const ix = Math.max(0, Math.min(fx + fw, tx + tw) - Math.max(fx, tx));
+        const iy = Math.max(0, Math.min(fy + fh, ty + th) - Math.max(fy, ty));
+        return ix * iy >= 0.5 * farea;
+      });
+    };
     const byPos = (a: WorkFinding, b: WorkFinding) =>
       a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0];
     const shown = findings
@@ -1003,32 +1014,62 @@ function detectShowthrough(cv: CV, normTest: Mat, ref: Mat, cfg: PipelineConfig,
 // --------------------------------------------------------------------------
 // 3.7 OCR 픽셀 대조
 // --------------------------------------------------------------------------
-function pixelCorroborated(cv: CV, mm: { bbox: BBox; tag: string },
-                           refInk: Mat, testInk: Mat,
-                           ellipse: (k: number) => Mat, pad = 10): boolean {
+const EV_PAD_X = 40;     // 단어 곁 추가 잉크(붙은 구두점 등) 탐색 여백
+const EV_PAD_Y = 10;
+const EV_BLOB_MIN = 60;  // 증거로 인정할 최소 잉크 덩어리(px)
+
+// OCR 불일치의 픽셀 증거 대조 — { ok, bbox? } 반환 (compare_artwork.py
+// pixel_evidence 포트). 종전에는 국소 diff "비율 ≥ 5%"만 요구해, 작은 단어
+// 박스에서는 AA 노이즈 몇 px, 큰 박스에서는 뒷비침 질감이 통과했다(오탐
+// 병목). 이제 **뭉친 덩어리(blob)** 를 요구한다. 실측(back-pair TEST-1,
+// 2026-08-03 사용자 판정 18건): 실결함 blob ≥ 75px, 오탐 ≤ 55px.
+//   - 추가 잉크(TEST에만): 단어 곁 구두점도 결함이므로 패딩 영역까지 인정
+//   - 누락 잉크(REF에만): 사라진 글리프는 단어 박스 **안**에 있어야 한다
+//   - 반환 bbox(증거 위치)로 표시 박스를 스냅해 위치 어긋남을 없앤다
+function pixelEvidence(cv: CV, mm: { bbox: BBox; tag: string },
+                       refInk: Mat, testInk: Mat,
+                       ellipse: (k: number) => Mat):
+                       { ok: boolean; bbox?: BBox } {
   const [x, y, w, h] = mm.bbox;
   const hh = refInk.rows, ww = refInk.cols;
-  const x0 = Math.max(x - pad, 0), y0 = Math.max(y - pad, 0);
-  const x1 = Math.min(x + w + pad, ww), y1 = Math.min(y + h + pad, hh);
-  if (x1 <= x0 || y1 <= y0) return false;
+  const x0 = Math.max(x - EV_PAD_X, 0), y0 = Math.max(y - EV_PAD_Y, 0);
+  const x1 = Math.min(x + w + EV_PAD_X, ww), y1 = Math.min(y + h + EV_PAD_Y, hh);
+  if (x1 <= x0 || y1 <= y0) return { ok: false };
   const rect = new cv.Rect(x0, y0, x1 - x0, y1 - y0);
   const rRoi = refInk.roi(rect), tRoi = testInk.roi(rect);
   const r = rRoi.clone(), t = tRoi.clone();
   rRoi.delete(); tRoi.delete();
-  const rn = cv.countNonZero(r), tn = cv.countNonZero(t);
-  let result: boolean;
-  if (mm.tag === "delete") result = tn < 0.5 * rn;
-  else if (mm.tag === "insert") result = rn < 0.5 * tn;
-  else {
-    const k3 = ellipse(3);
-    const a = andNotDilated(cv, t, r, k3);
-    const b = andNotDilated(cv, r, t, k3);
-    const ev = cv.countNonZero(a) + cv.countNonZero(b);
-    a.delete(); b.delete(); k3.delete();
-    result = ev >= 0.05 * Math.max(rn, 1);
+  if (mm.tag === "delete" || mm.tag === "insert") {
+    const rn = cv.countNonZero(r), tn = cv.countNonZero(t);
+    r.delete(); t.delete();
+    return { ok: mm.tag === "delete" ? tn < 0.5 * rn : rn < 0.5 * tn };
   }
-  r.delete(); t.delete();
-  return result;
+  const k3 = ellipse(3);
+  const added = andNotDilated(cv, t, r, k3);   // TEST에만 있는 잉크
+  const lost = andNotDilated(cv, r, t, k3);    // REF에만 있는 잉크
+  k3.delete(); r.delete(); t.delete();
+  const boxes: BBox[] = [];
+  for (const [mask, needInside] of [[added, false], [lost, true]] as const) {
+    const labels = new cv.Mat(), stats = new cv.Mat(), cents = new cv.Mat();
+    const n = cv.connectedComponentsWithStats(mask, labels, stats, cents, 8, cv.CV_32S);
+    labels.delete(); cents.delete();
+    for (let i = 1; i < n; i++) {
+      const area = stats.data32S[i * 5 + 4];
+      if (area < EV_BLOB_MIN) continue;
+      const abs: BBox = [x0 + stats.data32S[i * 5], y0 + stats.data32S[i * 5 + 1],
+                         stats.data32S[i * 5 + 2], stats.data32S[i * 5 + 3]];
+      if (needInside && !boxesIntersect(abs, mm.bbox)) continue;
+      boxes.push(abs);
+    }
+    stats.delete();
+  }
+  added.delete(); lost.delete();
+  if (!boxes.length) return { ok: false };
+  const ex0 = Math.min(...boxes.map((b) => b[0]));
+  const ey0 = Math.min(...boxes.map((b) => b[1]));
+  const ex1 = Math.max(...boxes.map((b) => b[0] + b[2]));
+  const ey1 = Math.max(...boxes.map((b) => b[1] + b[3]));
+  return { ok: true, bbox: [ex0, ey0, ex1 - ex0, ey1 - ey0] };
 }
 
 // --------------------------------------------------------------------------

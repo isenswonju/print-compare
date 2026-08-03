@@ -88,6 +88,27 @@ describe("trivialDiff — 대소문자 접기", () => {
     expect(trivialDiff("replace", ["mg/dL"], ["mg/dL."])).toBe(false);
   });
   it("내용이 실제로 다르면 대소문자 접기로도 통과하지 않는다", () => {
-    expect(trivialDiff("replace", ["Results"], ["Resultss"])).toBe(false);
+    // 3자 이상 차이는 통과하지 않는다(1~2자 접미 차이는 아래 계약 참조)
+    expect(trivialDiff("replace", ["Results"], ["Resultsabc"])).toBe(false);
+  });
+});
+
+describe("trivialDiff — 2026-08-03 실측 판정 기반 규칙 (back-pair)", () => {
+  it("영숫자 1~2자 접미/포함 차이는 줄 경계 오독으로 무시한다", () => {
+    // 실측 오탐: 'Strips'→'Strip', 'respective'→'respectiv:'
+    expect(trivialDiff("replace", ["Strips"], ["Strip"])).toBe(true);
+    expect(trivialDiff("replace", ["respective"], ["respectiv:"])).toBe(true);
+    // 글자가 정말 추가/삭제됐다면 잉크 diff 경로가 글리프 면적으로 잡는다
+    expect(trivialDiff("replace", ["Results"], ["Resultss"])).toBe(true);
+  });
+  it("rn→m 접합 오독은 무시한다", () => {
+    expect(trivialDiff("replace", ["return"], ["retum"])).toBe(true);
+  });
+  it("여러 단어(3+)가 반토막 이하로 붕괴하면 판독 실패로 무시한다", () => {
+    expect(trivialDiff("replace",
+      ["Keep", "test", "strips", "away", "from", "children"],
+      ["Mab", "Tet"])).toBe(true);
+    // 2단어 이하이거나 절반 이상 읽혔으면 계속 보고
+    expect(trivialDiff("replace", ["not", "have"], ["riot"])).toBe(false);
   });
 });

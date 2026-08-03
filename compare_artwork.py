@@ -1193,6 +1193,56 @@ def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
     missing_comps = split_reflow(missing_comps, ref, norm_test,
                                  raw_missing, test_ink_dil)
 
+    # 3.5c 질감 존 억제 — 번짐·흐릿 인쇄 지역의 소형 diff 는 결함이 아니라
+    # 인쇄 품질 저하다. 실측(back-pair TEST-2, 2026-08-03 사용자 판정): 오탐
+    # 4건의 주변(±150px)엔 <30px 부스러기가 119~219개, 실결함 주변은 2~49개
+    # (실결함 곁 노이즈는 큰 덩어리 몇 개 — 인접 실결함의 잔재). 부스러기가
+    # 많은 지역의 소형 성분만 억제하고, 큰 성분(세로 311px 실결함 등)은
+    # 면적 면제로 지킨다.
+    raw_all = cv2.bitwise_or(raw_extra, raw_missing)
+    px2 = (ref.shape[1] / REF_BASE_WIDTH) ** 2
+    speck_max = 18 * px2            # 부스러기로 칠 최대 면적
+    # 실측: 오탐 존은 기준폭 환산 70~128개, 실결함 최대는 pga #2(REV 행
+    # 메워짐)의 60개 — 65로 가른다
+    speck_thresh = 65 * px2
+    tz_pad = max(round(115 * ref.shape[1] / REF_BASE_WIDTH), 60)
+    tz_exempt = 880 * px2           # 이 면적 이상 성분은 존과 무관하게 보고
+    tz_extra_bright = 112           # extra 는 잉크가 이보다 옅을 때만 억제 —
+    #                                 진짜 메워짐/스팟은 진하고(실측 84~108),
+    #                                 번짐 잔재는 옅다(실측 121~130)
+
+    def in_texture_zone(c, is_extra: bool) -> bool:
+        if c["area"] >= tz_exempt:
+            return False
+        x, y, w2, h2 = c["bbox"]
+        if is_extra:
+            m = raw_extra[y:y + h2, x:x + w2] > 0
+            if m.any() and float(norm_test[y:y + h2, x:x + w2][m].mean()) \
+                    <= tz_extra_bright:
+                return False
+        hh, ww = raw_all.shape
+        x0, y0 = max(x - tz_pad, 0), max(y - tz_pad, 0)
+        x1, y1 = min(x + w2 + tz_pad, ww), min(y + h2 + tz_pad, hh)
+        win = raw_all[y0:y1, x0:x1].copy()
+        win[y - y0:y - y0 + h2, x - x0:x - x0 + w2] = 0   # 자기 자신 제외
+        n, _, stats, _ = cv2.connectedComponentsWithStats(win, connectivity=8)
+        specks = sum(1 for i in range(1, n)
+                     if stats[i, cv2.CC_STAT_AREA] < speck_max)
+        return specks >= speck_thresh
+
+    n_tz = 0
+    kept_e, kept_m = [], []
+    for comps, kept, is_extra in ((extra_comps, kept_e, True),
+                                  (missing_comps, kept_m, False)):
+        for c in comps:
+            if in_texture_zone(c, is_extra):
+                n_tz += 1
+            else:
+                kept.append(c)
+    extra_comps, missing_comps = kept_e, kept_m
+    if n_tz:
+        print(f"[질감] 번짐/흐릿 존 소형 diff 억제 {n_tz}건")
+
     findings: list[Finding] = []
     min_area_eff = cfg.min_area * (ref.shape[1] / REF_BASE_WIDTH) ** 2
     for c in extra_comps:

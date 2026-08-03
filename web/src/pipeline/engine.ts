@@ -216,6 +216,59 @@ export async function runPipeline(
   const nExtraAll = extraComps.length, nMissingAll = missingComps.length;
   extraComps = splitReflow(extraComps, normTest, ref, rawExtra, refInkDil);
   missingComps = splitReflow(missingComps, ref, normTest, rawMissing, testInkDil);
+
+  // ------------------------------------------------------------ 3.5c 질감 존 억제
+  // 번짐·흐릿 인쇄 지역의 소형 diff 는 결함이 아니라 인쇄 품질 저하다.
+  // 실측(back-pair TEST-2, 2026-08-03 사용자 판정): 오탐 4건의 주변(±150px)엔
+  // <30px 부스러기가 119~219개, 실결함 주변은 2~49개. 부스러기가 많은 지역의
+  // 소형 성분만 억제하고 큰 성분(세로 311px 실결함 등)은 면적 면제로 지킨다.
+  {
+    const rawAll = new cv.Mat();
+    cv.bitwise_or(rawExtra, rawMissing, rawAll);
+    const px2 = (ref.cols / REF_BASE_WIDTH) ** 2;
+    const speckMax = 18 * px2;
+    // 실측: 오탐 존은 기준폭 환산 70~128개, 실결함 최대는 pga #2(REV 행
+    // 메워짐)의 60개 — 65로 가른다
+    const speckThresh = 65 * px2;
+    const tzPad = Math.max(Math.round(115 * ref.cols / REF_BASE_WIDTH), 60);
+    const tzExempt = 880 * px2;
+    // extra 는 잉크가 이보다 옅을 때만 억제 — 진짜 메워짐/스팟은 진하고
+    // (실측 84~108), 번짐 잔재는 옅다(실측 121~130)
+    const tzExtraBright = 112;
+    const inTextureZone = (c: Comp, isExtra: boolean): boolean => {
+      if (c.area >= tzExempt) return false;
+      const [x, y, w, h] = c.bbox;
+      if (isExtra) {
+        const rawSub = matRect(cv, rawExtra, x, y, w, h);
+        const normSub = matRect(cv, normTest, x, y, w, h);
+        let sum = 0, cnt = 0;
+        for (let i = 0; i < rawSub.length; i++)
+          if (rawSub[i]) { sum += normSub[i]; cnt++; }
+        if (cnt > 0 && sum / cnt <= tzExtraBright) return false;
+      }
+      const x0 = Math.max(x - tzPad, 0), y0 = Math.max(y - tzPad, 0);
+      const x1 = Math.min(x + w + tzPad, rawAll.cols);
+      const y1 = Math.min(y + h + tzPad, rawAll.rows);
+      const roi = rawAll.roi(new cv.Rect(x0, y0, x1 - x0, y1 - y0));
+      const win = roi.clone(); roi.delete();
+      const self = win.roi(new cv.Rect(x - x0, y - y0, w, h));   // 자기 자신 제외
+      self.setTo(new cv.Scalar(0)); self.delete();
+      const labels = new cv.Mat(), stats = new cv.Mat(), cents = new cv.Mat();
+      const n = cv.connectedComponentsWithStats(win, labels, stats, cents, 8, cv.CV_32S);
+      labels.delete(); cents.delete(); win.delete();
+      let specks = 0;
+      for (let i = 1; i < n; i++)
+        if (stats.data32S[i * 5 + 4] < speckMax) specks++;
+      stats.delete();
+      return specks >= speckThresh;
+    };
+    let nTz = 0;
+    extraComps = extraComps.filter((c) => inTextureZone(c, true) ? (++nTz, false) : true);
+    missingComps = missingComps.filter((c) => inTextureZone(c, false) ? (++nTz, false) : true);
+    rawAll.delete();
+    if (nTz) log(`[질감] 번짐/흐릿 존 소형 diff 억제 ${nTz}건`);
+  }
+
   // 원시 diff 마스크는 여기까지 — 뒷비침 단계가 큰 버퍼를 잡기 전에 비워준다.
   rawExtra.delete(); rawMissing.delete();
   mark("리플로우", ts);

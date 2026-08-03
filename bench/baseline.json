@@ -1,5 +1,309 @@
 {
   "records": {
+    "python/back1": {
+      "accepted_at": "2026-08-03T13:06:13+09:00",
+      "defects_total": 21,
+      "elapsed_s": 22.0,
+      "findings_total": 24,
+      "fingerprint": {
+        "commit": "c01ccbd",
+        "config_hash": "153be6f6f779",
+        "dirty": false,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 12,
+      "margins": {
+        "1": 16.656,
+        "2": 1.053,
+        "4": 1.272,
+        "5": 27.975
+      },
+      "recall": [
+        5,
+        5
+      ],
+      "unlabeled": [
+        {
+          "area_px": 203,
+          "bbox": [
+            2822,
+            213,
+            12,
+            23
+          ],
+          "id": 1,
+          "margin": 2.969,
+          "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
+          "severity": "major",
+          "type": "extra"
+        },
+        {
+          "area_px": 893,
+          "bbox": [
+            2261,
+            326,
+            31,
+            58
+          ],
+          "id": 2,
+          "margin": 13.059,
+          "note": "TEST에만 존재하는 잉여 잉크",
+          "severity": "minor",
+          "type": "extra"
+        },
+        {
+          "area_px": 683,
+          "bbox": [
+            4041,
+            429,
+            30,
+            37
+          ],
+          "id": 3,
+          "margin": 9.988,
+          "note": "REF 대비 잉크 누락",
+          "severity": "major",
+          "type": "missing"
+        },
+        {
+          "area_px": 247,
+          "bbox": [
+            5643,
+            1172,
+            13,
+            19
+          ],
+          "id": 4,
+          "margin": null,
+          "note": "OCR 불일치: 'CHARACTERISTICS' → 'CHARACTERISTIGS'",
+          "severity": "critical",
+          "type": "text_mismatch"
+        },
+        {
+          "area_px": 139,
+          "bbox": [
+            6148,
+            3573,
+            8,
+            21
+          ],
+          "id": 13,
+          "margin": 2.033,
+          "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
+          "severity": "major",
+          "type": "extra"
+        },
+        {
+          "area_px": 565,
+          "bbox": [
+            2598,
+            4311,
+            16,
+            61
+          ],
+          "id": 14,
+          "margin": 8.262,
+          "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
+          "severity": "major",
+          "type": "extra"
+        },
+        {
+          "area_px": 5025,
+          "bbox": [
+            5352,
+            5422,
+            67,
+            75
+          ],
+          "id": 15,
+          "margin": null,
+          "note": "OCR 불일치: '100' → '106;'",
+          "severity": "critical",
+          "type": "text_mismatch"
+        },
+        {
+          "area_px": 1886,
+          "bbox": [
+            2584,
+            6064,
+            30,
+            368
+          ],
+          "id": 16,
+          "margin": 27.58,
+          "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
+          "severity": "major",
+          "type": "extra"
+        },
+        {
+          "area_px": 1900,
+          "bbox": [
+            4942,
+            6170,
+            479,
+            98
+          ],
+          "id": 17,
+          "margin": 27.784,
+          "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
+          "severity": "major",
+          "type": "extra"
+        },
+        {
+          "area_px": 78,
+          "bbox": [
+            5357,
+            6170,
+            64,
+            8
+          ],
+          "id": 18,
+          "margin": 1.141,
+          "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
+          "severity": "major",
+          "type": "extra"
+        },
+        {
+          "area_px": 85,
+          "bbox": [
+            5643,
+            1176,
+            12,
+            9
+          ],
+          "id": 22,
+          "margin": 1.243,
+          "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
+          "severity": "major",
+          "type": "extra"
+        },
+        {
+          "area_px": 1326,
+          "bbox": [
+            5353,
+            5423,
+            66,
+            74
+          ],
+          "id": 24,
+          "margin": 19.391,
+          "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
+          "severity": "major",
+          "type": "extra"
+        }
+      ]
+    },
+    "python/back2": {
+      "accepted_at": "2026-08-03T13:06:13+09:00",
+      "defects_total": 16,
+      "elapsed_s": 21.9,
+      "findings_total": 19,
+      "fingerprint": {
+        "commit": "c01ccbd",
+        "config_hash": "153be6f6f779",
+        "dirty": false,
+        "engine": "python",
+        "os": "Darwin arm64",
+        "versions": {
+          "numpy": "2.4.6",
+          "opencv": "5.0.0",
+          "python": "3.11.9",
+          "tesseract": "5.5.2"
+        }
+      },
+      "fp_count": 5,
+      "margins": {
+        "1": 22.535,
+        "2": 5.893,
+        "3": 55.13,
+        "4": 39.176,
+        "5": 4.051,
+        "6": 7.297
+      },
+      "recall": [
+        6,
+        6
+      ],
+      "unlabeled": [
+        {
+          "area_px": 395,
+          "bbox": [
+            3018,
+            203,
+            32,
+            23
+          ],
+          "id": 1,
+          "margin": 5.776,
+          "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
+          "severity": "major",
+          "type": "extra"
+        },
+        {
+          "area_px": 487,
+          "bbox": [
+            2950,
+            225,
+            36,
+            21
+          ],
+          "id": 2,
+          "margin": 7.122,
+          "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
+          "severity": "major",
+          "type": "extra"
+        },
+        {
+          "area_px": 2628,
+          "bbox": [
+            2191,
+            825,
+            128,
+            216
+          ],
+          "id": 3,
+          "margin": 38.43,
+          "note": "TEST에만 존재하는 잉여 잉크",
+          "severity": "minor",
+          "type": "extra"
+        },
+        {
+          "area_px": 2672,
+          "bbox": [
+            4623,
+            3686,
+            100,
+            226
+          ],
+          "id": 11,
+          "margin": 39.074,
+          "note": "TEST에만 존재하는 잉여 잉크 — 글자/괘선 영역 침범",
+          "severity": "major",
+          "type": "extra"
+        },
+        {
+          "area_px": 1480,
+          "bbox": [
+            677,
+            4720,
+            41,
+            48
+          ],
+          "id": 12,
+          "margin": 21.643,
+          "note": "TEST에만 존재하는 잉여 잉크",
+          "severity": "minor",
+          "type": "extra"
+        }
+      ]
+    },
     "python/benign-blur_noise": {
       "accepted_at": "2026-07-30T19:33:45+09:00",
       "defects_total": 0,

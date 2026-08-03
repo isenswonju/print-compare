@@ -1,0 +1,55 @@
+[
+  {
+    "id": "back1",
+    "kind": "labeled",
+    "group": "tune",
+    "source": {
+      "ref": "private/bench-cases/back-pair/REF.png",
+      "test": "private/bench-cases/back-pair/TEST-1.png"
+    },
+    "fp_budget": 13,
+    "note": "뒷면 라벨 실물 쌍 #1 (7275x6614). 미판정 검출 12건이 예산을 차지한다(판정되면 must_find 승격 또는 forbid 로 옮기고 예산을 줄일 것). 2026-08-03 사용자 육안 판정 2라운드로 확정 — 판정 원장은 private/bench-cases/back-pair/labels.json. 이 케이스가 잡은 회귀: OCR 오탐 13건(비율→blob 증거 교체), 빨간 박스 위치 어긋남(증거 스냅), CLI min-area 60 잔재('10' 오염 미검출)",
+    "must_find": [
+      { "id": "1", "types": ["text_mismatch", "extra"], "bbox": [6936, 1355, 57, 63],
+        "note": "'blood' 오른쪽 잉여 마침표 — 구두점 추가는 문자열 규칙으로 거르면 안 되는 실결함의 표본" },
+      { "id": "2", "types": ["text_mismatch", "extra"], "bbox": [1380, 2610, 277, 13],
+        "note": "'to fingerstick' 행 오염('te fingerstiek'). 왼쪽 끝에 'compared'의 d 내부 오염(56+51px 분리)도 포함 — 단독 검출은 아직 안 됨(알려진 한계)" },
+      { "id": "3", "types": ["text_mismatch", "extra"], "bbox": [4595, 2687, 10, 14],
+        "note": "'°C).'의 C→Q 오염" },
+      { "id": "4", "types": ["extra"], "bbox": [4426, 2689, 13, 19],
+        "note": "'10' 오염(#3과 동일 유형, 87px) — OCR 로는 안 잡히는 소형 오염의 표본. min_area 40 에서만 검출된다" },
+      { "id": "5", "types": ["text_mismatch", "extra"], "bbox": [4875, 3157, 53, 92],
+        "note": "'Within' 앞 잉여 세로획('\\Within') — text 와 extra 두 경로가 함께 잡는다" }
+    ],
+    "forbid": []
+  },
+  {
+    "id": "back2",
+    "kind": "labeled",
+    "group": "tune",
+    "source": {
+      "ref": "private/bench-cases/back-pair/REF.png",
+      "test": "private/bench-cases/back-pair/TEST-2.png"
+    },
+    "fp_budget": 6,
+    "note": "뒷면 라벨 실물 쌍 #2 (7275x6614). 미판정 검출 5건이 예산을 차지한다. 2026-08-03 사용자 판정 — 원장은 labels.json. 이 케이스가 잡은 회귀: 번짐 존 픽셀 오탐 4건(부스러기 밀도 억제), rn→m 오독, 살짝 겹친 실결함의 회색 오강등(교차 50% 규칙)",
+    "must_find": [
+      { "id": "1", "types": ["text_mismatch", "extra"], "bbox": [3389, 2848, 118, 62],
+        "note": "'appropriate'→'approggate' 오염 군집('meter may'→'mete' 포함)" },
+      { "id": "2", "types": ["text_mismatch", "extra"], "bbox": [2771, 3583, 30, 28],
+        "note": "'CVS'→'@WS' 오염" },
+      { "id": "3", "types": ["missing", "text_mismatch"], "bbox": [5831, 3616, 180, 85],
+        "note": "CV=3.8%/CV=4.2% 행 통째 누락 — 수치 데이터 소실" },
+      { "id": "4", "types": ["extra"], "bbox": [6952, 5701, 83, 311],
+        "note": "세로로 긴 잉여 잉크(83x311) — 단어 박스와 살짝 겹쳐 회색 강등됐던 실결함. 번짐 존 억제의 면적 면제(≥880px)로도 보호된다" },
+      { "id": "5", "types": ["extra"], "bbox": [5216, 5387, 53, 16],
+        "note": "'Inc.' 곁 잉여 잉크 — OCR 박스('Inc.+4-')가 아니라 픽셀 박스가 정위치" },
+      { "id": "6", "types": ["extra"], "bbox": [5377, 5414, 24, 40],
+        "note": "'100' 곁 잉여 잉크('1000' 오독의 실체)" }
+    ],
+    "forbid": [
+      { "bbox": [6560, 5900, 280, 70],
+        "note": "번짐 라인(y5917)의 질감 오탐 4건이 살던 자리 — 사용자 확인 오탐. 여기서 결함이 부활하면 FAIL" }
+    ]
+  }
+]

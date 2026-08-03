@@ -8,7 +8,7 @@
       "test": "private/bench-cases/back-pair/TEST-1.png"
     },
     "fp_budget": 13,
-    "note": "뒷면 라벨 실물 쌍 #1 (7275x6614). 미판정 검출 12건이 예산을 차지한다(판정되면 must_find 승격 또는 forbid 로 옮기고 예산을 줄일 것). 2026-08-03 사용자 육안 판정 2라운드로 확정 — 판정 원장은 private/bench-cases/back-pair/labels.json. 이 케이스가 잡은 회귀: OCR 오탐 13건(비율→blob 증거 교체), 빨간 박스 위치 어긋남(증거 스냅), CLI min-area 60 잔재('10' 오염 미검출)",
+    "note": "뒷면 라벨 실물 쌍 #1 (7275x6614). 잔여 검출 12건은 2026-08-03 오너 결정으로 현 상태 그대로 수용(추가 판정 안 함) — 이후 판정은 앱 피드백 데이터로만 진행한다. 2026-08-03 사용자 육안 판정 2라운드로 확정 — 판정 원장은 private/bench-cases/back-pair/labels.json. 이 케이스가 잡은 회귀: OCR 오탐 13건(비율→blob 증거 교체), 빨간 박스 위치 어긋남(증거 스냅), CLI min-area 60 잔재('10' 오염 미검출)",
     "must_find": [
       { "id": "1", "types": ["text_mismatch", "extra"], "bbox": [6936, 1355, 57, 63],
         "note": "'blood' 오른쪽 잉여 마침표 — 구두점 추가는 문자열 규칙으로 거르면 안 되는 실결함의 표본" },
@@ -32,7 +32,7 @@
       "test": "private/bench-cases/back-pair/TEST-2.png"
     },
     "fp_budget": 6,
-    "note": "뒷면 라벨 실물 쌍 #2 (7275x6614). 미판정 검출 5건이 예산을 차지한다. 2026-08-03 사용자 판정 — 원장은 labels.json. 이 케이스가 잡은 회귀: 번짐 존 픽셀 오탐 4건(부스러기 밀도 억제), rn→m 오독, 살짝 겹친 실결함의 회색 오강등(교차 50% 규칙)",
+    "note": "뒷면 라벨 실물 쌍 #2 (7275x6614). 잔여 검출 5건은 현 상태 그대로 수용(2026-08-03) — 이후 판정은 앱 피드백 데이터로만 진행한다. 2026-08-03 사용자 판정 — 원장은 labels.json. 이 케이스가 잡은 회귀: 번짐 존 픽셀 오탐 4건(부스러기 밀도 억제), rn→m 오독, 살짝 겹친 실결함의 회색 오강등(교차 50% 규칙)",
     "must_find": [
       { "id": "1", "types": ["text_mismatch", "extra"], "bbox": [3389, 2848, 118, 62],
         "note": "'appropriate'→'approggate' 오염 군집('meter may'→'mete' 포함)" },

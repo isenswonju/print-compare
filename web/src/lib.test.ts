@@ -106,10 +106,10 @@ describe("mapDisplay", () => {
     const d = mapDisplay(finding({ id: 1, type: "text_mismatch", note: "노트만" }));
     expect(d!.note).toBe("인쇄 내용 불일치"); // detail 없음 → 괄호 미표기
   });
-  it("faded는 '인쇄 농도'(major)로, 엔진 문구를 그대로 쓴다", () => {
+  it("faded는 '가독성'(major)으로 — '인쇄 농도' 유형은 고객 분류에 없다(8/5)", () => {
     const d = mapDisplay(finding({ id: 1, type: "faded",
       note: "인쇄 농도 부족 — 잉크 진하기가 이 페이지 평균의 55% 수준(옅게 인쇄됨)" }));
-    expect(d).toMatchObject({ ktype: "인쇄 농도", severity: "major" });
+    expect(d).toMatchObject({ ktype: "가독성", severity: "major" });
     expect(d!.note).toContain("55%");
   });
   it("faded에 문구가 없으면 기본 설명", () => {

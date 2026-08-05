@@ -121,9 +121,11 @@ export function mapDisplay(f: Finding): Disp | null {
     case "missing":
       return { ktype: "인쇄 누락", severity: "critical", note: "미 인쇄(인쇄 누락)" };
     case "faded":
-      // 미인쇄와는 구분한다 — 사용자도 "흐리긴 하지만 미 인쇄는 아니다"라고
-      // 따로 판정한다. 문구에 실측 농도비(엔진 note)를 그대로 붙인다.
-      return { ktype: "인쇄 농도", severity: "major",
+      // '인쇄 농도'라는 불량 유형은 고객 분류에 없다(2026-08-05 확정) —
+      // 옅은 인쇄는 가독성 저하로 분류한다. 미인쇄와는 구분("흐리긴 하지만
+      // 미 인쇄는 아니다"라는 판정 유지)하기 위해 심각도는 MAJOR로 두고
+      // 실측 농도비(엔진 note)를 그대로 붙인다.
+      return { ktype: "가독성", severity: "major",
                note: f.note || "인쇄 농도 부족(옅게 인쇄됨)" };
     default:
       return null;
@@ -289,7 +291,7 @@ export function feedbackCsv(results: ResultItem[]): string {
 // ---------------------------------------------------------------- 피드백 전송
 // 피드백은 맥미니 서버(feedback/feedback.jsonl)에 축적되어 오탐 튜닝의 입력이
 // 된다. 문제 부위 크롭 + 엔진 분석 데이터 + 원본 이미지(사용자 승인)를 보낸다.
-export const APP_VERSION = "2026-08-05.1";
+export const APP_VERSION = "2026-08-05.2";
 // same-origin 폴백: /app/이면 같은 서버 /feedback, hf.space 정적이면 없음.
 export function computeFeedbackEndpoints(hostname: string): string[] {
   return hostname.endsWith("hf.space") ? [] : ["/feedback"];

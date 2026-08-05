@@ -41,6 +41,7 @@ DEFAULT_JSONL = FEEDBACK_DIR / "feedback.jsonl"
 KTYPE_TO_TYPES = {
     "잉크 스팟": ["extra"],
     "잉여 잉크": ["extra"],
+    "인쇄/오염": ["extra", "text_mismatch"],   # 여백 오염(오염이 읽힘을 바꾼 경우 포함)
     "누락": ["missing"],
     "잉크 누락": ["missing"],
     "옅은 인쇄": ["faded"],

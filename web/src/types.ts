@@ -34,7 +34,10 @@ export interface Finding {
   // 임계값 여유도(정확도 안전망용, Python Finding.metrics 와 동일 계약).
   // margin 1.0 = 임계값에 딱 걸침. 통과했는데 마진이 줄어드는 변경은 아직
   // 안 터진 회귀이므로 bench 가 WARN 으로 잡는다.
-  metrics?: { margin: number | null; basis: string };
+  // touch_text_px: 잉여 잉크가 REF 글자 잉크와 맞닿은 픽셀 수(여백 오염 vs
+  // 침범 판별). evidence: text_mismatch 픽셀 증거 극성(added|lost|mixed).
+  metrics?: { margin?: number | null; basis?: string;
+              touch_text_px?: number; evidence?: string };
 }
 
 export interface PipelineResult {

@@ -34,7 +34,8 @@ interface WorkFinding {
   area: number;
   note: string;
   nearText?: string;
-  metrics?: { margin: number | null; basis: string };
+  metrics?: { margin?: number | null; basis?: string;
+              touch_text_px?: number; evidence?: string };
 }
 
 // 임계값 여유도 — Python 의 area_margin()과 같은 계약(1.0 = 임계값에 딱 걸침).
@@ -397,6 +398,7 @@ export async function runPipeline(
         type: "text_mismatch", bbox,
         area: bbox[2] * bbox[3],
         note: `OCR 불일치: '${mm.refText}' → '${mm.testText}'`,
+        ...(ev.polarity ? { metrics: { evidence: ev.polarity } } : {}),
       });
     }
   }
@@ -409,6 +411,13 @@ export async function runPipeline(
   for (const f of findings) {
     f.severity = classifySeverity(f, refWords, revLines, boxMask);
     f.nearText = nearestText(f.bbox, refWords);
+    // 잉여 잉크 계열은 글자 접촉량을 실측해 기록 — 표시 유형(여백 오염
+    // '인쇄/오염' vs 침범 '가독성')은 이 값으로 가른다(lib.ts mapDisplay).
+    if (f.type === "extra" || (f.type === "text_mismatch"
+                               && f.metrics?.evidence === "added")) {
+      f.metrics = { ...f.metrics, touch_text_px:
+                    touchTextPx(cv, f.bbox, refInk, testInk, refWords, ellipse) };
+    }
     if (!f.note) {
       if (f.type === "extra") {
         f.note = "TEST에만 존재하는 잉여 잉크";
@@ -620,7 +629,7 @@ function fadedComponents(cv: CV, refInk: Mat, testInk: Mat, ref: Mat,
   const ratio = (i: number) => (refSum[i] > 0 ? testSum[i] / refSum[i] : 1);
   const sorted = idx.map(ratio).sort((a, b) => a - b);
   const medDark = sorted[Math.floor(sorted.length / 2)];
-  const lim = Math.min(cfg.fadeRel * medDark, cfg.fadeAbs);
+  const lim = Math.min(cfg.fadeRel * medDark, cfg.fadeAbs) * (1 - cfg.fadeGuard);
   const out: Comp[] = [];
   for (const i of idx) {
     if (ratio(i) >= lim) continue;
@@ -1079,10 +1088,13 @@ const EV_BLOB_MIN = 60;  // 증거로 인정할 최소 잉크 덩어리(px)
 //   - 추가 잉크(TEST에만): 단어 곁 구두점도 결함이므로 패딩 영역까지 인정
 //   - 누락 잉크(REF에만): 사라진 글리프는 단어 박스 **안**에 있어야 한다
 //   - 반환 bbox(증거 위치)로 표시 박스를 스냅해 위치 어긋남을 없앤다
+// polarity(증거 극성)는 표시 유형 판단에 쓴다(2026-08-03 사용자 판정 8건):
+// 증거가 전부 추가 잉크("added")면 내용이 바뀐 게 아니라 오염이 읽힘을 바꾼
+// 것이므로 '인쇄 내용 불일치'가 아니라 오염/침범으로 표시해야 한다.
 function pixelEvidence(cv: CV, mm: { bbox: BBox; tag: string },
                        refInk: Mat, testInk: Mat,
                        ellipse: (k: number) => Mat):
-                       { ok: boolean; bbox?: BBox } {
+                       { ok: boolean; bbox?: BBox; polarity?: string } {
   const [x, y, w, h] = mm.bbox;
   const hh = refInk.rows, ww = refInk.cols;
   const x0 = Math.max(x - EV_PAD_X, 0), y0 = Math.max(y - EV_PAD_Y, 0);
@@ -1102,7 +1114,9 @@ function pixelEvidence(cv: CV, mm: { bbox: BBox; tag: string },
   const lost = andNotDilated(cv, r, t, k3);    // REF에만 있는 잉크
   k3.delete(); r.delete(); t.delete();
   const boxes: BBox[] = [];
-  for (const [mask, needInside] of [[added, false], [lost, true]] as const) {
+  const pols = new Set<string>();
+  for (const [mask, needInside, pol] of
+       [[added, false, "added"], [lost, true, "lost"]] as const) {
     const labels = new cv.Mat(), stats = new cv.Mat(), cents = new cv.Mat();
     const n = cv.connectedComponentsWithStats(mask, labels, stats, cents, 8, cv.CV_32S);
     labels.delete(); cents.delete();
@@ -1113,6 +1127,7 @@ function pixelEvidence(cv: CV, mm: { bbox: BBox; tag: string },
                          stats.data32S[i * 5 + 2], stats.data32S[i * 5 + 3]];
       if (needInside && !boxesIntersect(abs, mm.bbox)) continue;
       boxes.push(abs);
+      pols.add(pol);
     }
     stats.delete();
   }
@@ -1122,7 +1137,60 @@ function pixelEvidence(cv: CV, mm: { bbox: BBox; tag: string },
   const ey0 = Math.min(...boxes.map((b) => b[1]));
   const ex1 = Math.max(...boxes.map((b) => b[0] + b[2]));
   const ey1 = Math.max(...boxes.map((b) => b[1] + b[3]));
-  return { ok: true, bbox: [ex0, ey0, ex1 - ex0, ey1 - ey0] };
+  return { ok: true, bbox: [ex0, ey0, ex1 - ex0, ey1 - ey0],
+           polarity: pols.size === 1 ? [...pols][0] : "mixed" };
+}
+
+// 잉여(추가) 잉크가 REF **글자 잉크**와 맞닿은 픽셀 수 — 여백 오염('인쇄/
+// 오염')과 인쇄 영역 침범('가독성')을 가르는 실측량(2026-08-03 사용자 판정
+// 8건: 오염 ≤6px, 침범 ≥33px). 괘선·표선 접촉은 글자가 아니므로 세지
+// 않는다 — OCR 단어 박스 안의 REF 잉크만 글자 잉크로 인정한다.
+// compare_artwork.py touch_text_px 포트.
+const TOUCH_DIL = 7;
+function touchTextPx(cv: CV, bbox: BBox, refInk: Mat, testInk: Mat,
+                     refWords: Word[], ellipse: (k: number) => Mat): number {
+  if (!refWords.length) return 0;
+  const [x, y, w, h] = bbox.map(Math.trunc);
+  const hh = refInk.rows, ww = refInk.cols;
+  const x0 = Math.max(x - TOUCH_DIL, 0), y0 = Math.max(y - TOUCH_DIL, 0);
+  const x1 = Math.min(x + w + TOUCH_DIL, ww), y1 = Math.min(y + h + TOUCH_DIL, hh);
+  if (x1 <= x0 || y1 <= y0) return 0;
+  const rect = new cv.Rect(x0, y0, x1 - x0, y1 - y0);
+  const rRoi = refInk.roi(rect), tRoi = testInk.roi(rect);
+  const r = rRoi.clone(), t = tRoi.clone();
+  rRoi.delete(); tRoi.delete();
+  const k3 = ellipse(3);
+  const added = andNotDilated(cv, t, r, k3);
+  k3.delete(); t.delete();
+  if (!cv.countNonZero(added)) { r.delete(); added.delete(); return 0; }
+  const wordInk = cv.Mat.zeros(r.rows, r.cols, r.type());
+  const roiBox: BBox = [x0, y0, x1 - x0, y1 - y0];
+  for (const wd of refWords) {
+    if (!boxesIntersect(roiBox, wd.bbox)) continue;
+    const gx0 = Math.max(wd.bbox[0], x0), gy0 = Math.max(wd.bbox[1], y0);
+    const gx1 = Math.min(wd.bbox[0] + wd.bbox[2], x1);
+    const gy1 = Math.min(wd.bbox[1] + wd.bbox[3], y1);
+    if (gx1 <= gx0 || gy1 <= gy0) continue;
+    const sub = new cv.Rect(gx0 - x0, gy0 - y0, gx1 - gx0, gy1 - gy0);
+    const src = r.roi(sub), dst = wordInk.roi(sub);
+    src.copyTo(dst);
+    src.delete(); dst.delete();
+  }
+  r.delete();
+  let out = 0;
+  if (cv.countNonZero(wordInk)) {
+    const kd = ellipse(TOUCH_DIL);
+    const zone = new cv.Mat();
+    cv.dilate(wordInk, zone, kd);
+    kd.delete();
+    const hit = new cv.Mat();
+    cv.bitwise_and(added, zone, hit);
+    zone.delete();
+    out = cv.countNonZero(hit);
+    hit.delete();
+  }
+  wordInk.delete(); added.delete();
+  return out;
 }
 
 // --------------------------------------------------------------------------

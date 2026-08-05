@@ -91,6 +91,11 @@ class Config:
                                    # 근거값은 missing_max_ref와 동일.
     fade_rel: float = 0.70         # 농도비가 페이지 중앙값의 이 배수 미만이면 옅은 인쇄
     fade_abs: float = 0.80         # 동시에 이 절대값 미만일 때만(전체가 옅은 경우 방어)
+    fade_guard: float = 0.03       # 판정선 가드밴드 — 선 3% 이내는 엔진 간(wasm/
+    #                                python) 수치 요동 범위라 보고하지 않는다.
+    #                                실측(back-pair 2026-08-05): 사용자 확인 오탐이
+    #                                선 0.8% 안쪽(웹 0.596 vs 선 0.601, 파이썬은 선
+    #                                밖), 실결함(faded_word)은 선 아래 37% 이상
 
     # 뒷비침
     ghost_lo: int = 150
@@ -487,7 +492,7 @@ def faded_findings(ref_ink: np.ndarray, test_ink: np.ndarray,
     # 블러+노이즈+톤 저하를 먹여도 중앙값이 1.13→1.11로만 움직였다(=전체적으로
     # 옅은 인쇄는 통과), 반면 국소적으로 옅어진 글자는 0.49로 떨어진다.
     med_dark = float(np.median(dark_ratio[idx]))
-    lim = min(cfg.fade_rel * med_dark, cfg.fade_abs)
+    lim = min(cfg.fade_rel * med_dark, cfg.fade_abs) * (1 - cfg.fade_guard)
     out = []
     for i in idx:
         d = float(dark_ratio[i])
@@ -773,8 +778,14 @@ EV_BLOB_MIN = 60     # 증거로 인정할 최소 잉크 덩어리(px)
 
 
 def pixel_evidence(mm: dict, ref_ink: np.ndarray,
-                   test_ink: np.ndarray) -> tuple[bool, tuple | None]:
-    """OCR 불일치의 픽셀 증거 대조 — (인정 여부, 증거 덩어리 합집합 bbox).
+                   test_ink: np.ndarray) -> tuple[bool, tuple | None, str | None]:
+    """OCR 불일치의 픽셀 증거 대조 — (인정 여부, 증거 합집합 bbox, 증거 극성).
+
+    극성은 표시 유형 판단에 쓴다(2026-08-03 사용자 판정 8건): 증거가 전부
+    **추가 잉크**면 내용이 바뀐 게 아니라 오염이 읽힘을 바꾼 것이므로
+    '인쇄 내용 불일치'가 아니라 오염/침범으로 표시해야 한다.
+    "added" = 추가 잉크만 · "lost" = 누락 잉크만 · "mixed" = 둘 다 ·
+    None = 덩어리 증거 없이 인정된 경우(delete/insert 잉크 총량비).
 
     종전에는 국소 diff "비율 ≥ 5%"만 요구해, 작은 단어 박스에서는 AA 노이즈
     몇 px, 큰 박스에서는 뒷비침 질감이 통과했다(오탐 병목). 이제 **뭉친
@@ -795,14 +806,14 @@ def pixel_evidence(mm: dict, ref_ink: np.ndarray,
     r = ref_ink[y0:y1, x0:x1]
     t = test_ink[y0:y1, x0:x1]
     if mm["tag"] == "delete":
-        return int(cv2.countNonZero(t)) < 0.5 * int(cv2.countNonZero(r)), None
+        return int(cv2.countNonZero(t)) < 0.5 * int(cv2.countNonZero(r)), None, None
     if mm["tag"] == "insert":
-        return int(cv2.countNonZero(r)) < 0.5 * int(cv2.countNonZero(t)), None
+        return int(cv2.countNonZero(r)) < 0.5 * int(cv2.countNonZero(t)), None, None
     k3 = ellipse(3)
     added = cv2.bitwise_and(t, cv2.bitwise_not(cv2.dilate(r, k3)))
     lost = cv2.bitwise_and(r, cv2.bitwise_not(cv2.dilate(t, k3)))
-    boxes = []
-    for mask, need_inside in ((added, False), (lost, True)):
+    boxes, pols = [], set()
+    for mask, need_inside, pol in ((added, False, "added"), (lost, True, "lost")):
         n, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
         for i in range(1, n):
             bx, by, bw, bh, area = (int(v) for v in stats[i][:5])
@@ -812,13 +823,15 @@ def pixel_evidence(mm: dict, ref_ink: np.ndarray,
             if need_inside and not boxes_intersect(abs_box, mm["bbox"]):
                 continue
             boxes.append(abs_box)
+            pols.add(pol)
     if not boxes:
-        return False, None
+        return False, None, None
     ex0 = min(b[0] for b in boxes)
     ey0 = min(b[1] for b in boxes)
     ex1 = max(b[0] + b[2] for b in boxes)
     ey1 = max(b[1] + b[3] for b in boxes)
-    return True, (ex0, ey0, ex1 - ex0, ey1 - ey0)
+    polarity = pols.pop() if len(pols) == 1 else "mixed"
+    return True, (ex0, ey0, ex1 - ex0, ey1 - ey0), polarity
 
 
 # ---------------------------------------------------------------------------
@@ -909,6 +922,48 @@ def classify_severity(f: Finding, ref_words: list[dict],
     if box_mask[cy, cx]:
         return "major"
     return "minor"
+
+
+TOUCH_DIL = 7   # 글자 잉크 접촉 판정 반경(ellipse 지름px) — 실측 후 조정
+
+
+def touch_text_px(bbox: tuple, ref_ink: np.ndarray, test_ink: np.ndarray,
+                  ref_words: list[dict]) -> int:
+    """잉여(추가) 잉크가 REF **글자 잉크**와 맞닿은 픽셀 수.
+
+    여백 오염('인쇄/오염')과 인쇄 영역 침범('가독성')을 가르는 실측량
+    (2026-08-03 사용자 판정 8건). 괘선·표선 접촉은 글자가 아니므로 세지
+    않는다 — OCR 단어 박스 안의 REF 잉크만 글자 잉크로 인정한다.
+    """
+    if not ref_words:
+        return 0
+    x, y, w, h = (int(v) for v in bbox)
+    hh, ww = ref_ink.shape
+    pad = TOUCH_DIL
+    x0, y0 = max(x - pad, 0), max(y - pad, 0)
+    x1, y1 = min(x + w + pad, ww), min(y + h + pad, hh)
+    if x1 <= x0 or y1 <= y0:
+        return 0
+    r = ref_ink[y0:y1, x0:x1]
+    t = test_ink[y0:y1, x0:x1]
+    added = cv2.bitwise_and(t, cv2.bitwise_not(cv2.dilate(r, ellipse(3))))
+    if not cv2.countNonZero(added):
+        return 0
+    word_ink = np.zeros_like(r)
+    roi_box = (x0, y0, x1 - x0, y1 - y0)
+    for wd in ref_words:
+        if not boxes_intersect(roi_box, wd["bbox"]):
+            continue
+        wx, wy, wwd, wht = wd["bbox"]
+        gx0, gy0 = max(wx, x0), max(wy, y0)
+        gx1, gy1 = min(wx + wwd, x1), min(wy + wht, y1)
+        if gx1 > gx0 and gy1 > gy0:
+            word_ink[gy0 - y0:gy1 - y0, gx0 - x0:gx1 - x0] = \
+                r[gy0 - y0:gy1 - y0, gx0 - x0:gx1 - x0]
+    if not cv2.countNonZero(word_ink):
+        return 0
+    zone = cv2.dilate(word_ink, ellipse(TOUCH_DIL))
+    return int(cv2.countNonZero(cv2.bitwise_and(added, zone)))
 
 
 def nearest_text(bbox: tuple, ref_words: list[dict], k: int = 3) -> str:
@@ -1337,7 +1392,7 @@ def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
                   f"({time.time() - t_ocr:.1f}s)")
             rev_lines = line_boxes_with(ref_words, "REV")
             for mm in text_mismatches(ref_words, test_words):
-                ok, ev_bbox = pixel_evidence(mm, ref_ink, test_ink)
+                ok, ev_bbox, ev_pol = pixel_evidence(mm, ref_ink, test_ink)
                 if not ok:
                     continue
                 # 리플로우 지역에서는 국소 diff가 커서 픽셀 대조가 무력화됨 —
@@ -1353,7 +1408,8 @@ def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
                 findings.append(Finding(
                     type="text_mismatch", bbox_ref=bbox,
                     area_px=bbox[2] * bbox[3],
-                    note=f"OCR 불일치: '{mm['ref_text']}' → '{mm['test_text']}'"))
+                    note=f"OCR 불일치: '{mm['ref_text']}' → '{mm['test_text']}'",
+                    metrics={"evidence": ev_pol} if ev_pol else {}))
         except Exception as e:  # tesseract 미설치 등
             print(f"[OCR] 실패({e}) — OCR 경로 생략. --no-ocr 로 경고 억제 가능.")
 
@@ -1364,6 +1420,12 @@ def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
     for f in findings:
         f.severity = classify_severity(f, ref_words, rev_lines, box_mask)
         f.near_text = nearest_text(f.bbox_ref, ref_words)
+        # 잉여 잉크 계열은 글자 접촉량을 실측해 기록 — 표시 유형(여백 오염
+        # '인쇄/오염' vs 침범 '가독성')은 이 값으로 가른다(web mapDisplay).
+        if f.type == "extra" or (f.type == "text_mismatch"
+                                 and f.metrics.get("evidence") == "added"):
+            f.metrics = {**f.metrics, "touch_text_px":
+                         touch_text_px(f.bbox_ref, ref_ink, test_ink, ref_words)}
         if not f.note:
             if f.type == "extra":
                 f.note = "TEST에만 존재하는 잉여 잉크"

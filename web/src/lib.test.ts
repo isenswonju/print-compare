@@ -60,6 +60,38 @@ describe("mapDisplay", () => {
     expect(mapDisplay(finding({ id: 1, type: "extra", severity: "major" })))
       .toMatchObject({ ktype: "가독성", severity: "critical" });
   });
+  // 글자 접촉 실측(touch_text_px)이 있으면 severity 근사보다 우선한다 —
+  // 실측 경계(back-pair TEST-1, 2026-08-03 사용자 판정 8건): 오염 ≤6, 침범 ≥33.
+  it("extra major라도 글자 접촉 0이면 여백 오염 → 인쇄/오염", () => {
+    expect(mapDisplay(finding({ id: 1, type: "extra", severity: "major",
+        metrics: { touch_text_px: 6 } })))
+      .toMatchObject({ ktype: "인쇄/오염", severity: "major" });
+  });
+  it("extra minor라도 글자 접촉이 크면 침범 → 가독성", () => {
+    expect(mapDisplay(finding({ id: 1, type: "extra", severity: "minor",
+        metrics: { touch_text_px: 33 } })))
+      .toMatchObject({ ktype: "가독성", severity: "critical" });
+  });
+  it("text_mismatch 증거가 추가 잉크뿐이고 글자 접촉 없으면 → 인쇄/오염", () => {
+    // 'blood' → 'blood.' — 여백의 오염 점이 읽힘만 바꾼 경우(내용 불일치 아님)
+    expect(mapDisplay(finding({ id: 1, type: "text_mismatch",
+        note: "OCR 불일치: 'blood' → 'blood.'",
+        metrics: { evidence: "added", touch_text_px: 6 } })))
+      .toMatchObject({ ktype: "인쇄/오염", severity: "major" });
+  });
+  it("text_mismatch 증거가 추가 잉크 + 글자 접촉이면 → 가독성", () => {
+    // '°C).' → '°Q).' — 오염이 글자를 메워 가독성을 해친 경우
+    expect(mapDisplay(finding({ id: 1, type: "text_mismatch",
+        note: "OCR 불일치: '°C).' → '°Q).'",
+        metrics: { evidence: "added", touch_text_px: 35 } })))
+      .toMatchObject({ ktype: "가독성", severity: "critical" });
+  });
+  it("text_mismatch 증거가 잉크 누락(lost)이면 종전대로 인쇄 오류", () => {
+    expect(mapDisplay(finding({ id: 1, type: "text_mismatch",
+        note: "OCR 불일치: 'Strips' → 'Strip'",
+        metrics: { evidence: "lost" } })))
+      .toMatchObject({ ktype: "인쇄 오류", severity: "critical" });
+  });
   it("missing → 인쇄 누락(critical)", () => {
     expect(mapDisplay(finding({ id: 1, type: "missing" })))
       .toMatchObject({ ktype: "인쇄 누락", severity: "critical" });

@@ -86,13 +86,34 @@ export async function ocrCanvas(canvas: HTMLCanvasElement,
 // ---------------------------------------------------------------- 표시 매핑
 // 고객 요청(2026-07) 결과 표시 매핑 — 원본 findings 데이터는 그대로 두고
 // 화면 표시만 변환. showthrough(뒷비침)는 불량 미처리로 결과에서 제외.
+
+// 여백 오염('인쇄/오염')과 인쇄 영역 침범('가독성')을 가르는 글자 접촉
+// 임계값(px). 실측(back-pair TEST-1, 2026-08-03 사용자 판정 8건): 여백 오염
+// ≤6px, 글자 침범 ≥33px — 사이값 20으로 확정.
+const TOUCH_MIN = 20;
+
+const dispContam: Disp =
+  { ktype: "인쇄/오염", severity: "major", note: "여백 인쇄/오염 불량" };
+const dispLegibility: Disp =
+  { ktype: "가독성", severity: "critical", note: "인쇄 영역 침범/가독성 저하" };
+
 export function mapDisplay(f: Finding): Disp | null {
   switch (f.type) {
-    case "extra":
-      return f.severity === "minor"
-        ? { ktype: "인쇄/오염", severity: "major", note: "여백 인쇄/오염 불량" }
-        : { ktype: "가독성", severity: "critical", note: "인쇄 영역 침범/가독성 저하" };
+    case "extra": {
+      // 글자 잉크 접촉 실측(touch_text_px)이 있으면 그것으로, 없으면(구버전
+      // 결과) 종전 severity 근사로 가른다.
+      const touch = f.metrics?.touch_text_px;
+      const invades = touch != null ? touch >= TOUCH_MIN : f.severity !== "minor";
+      return invades ? { ...dispLegibility } : { ...dispContam };
+    }
     case "text_mismatch": {
+      // 증거가 전부 추가 잉크면 내용이 바뀐 게 아니라 오염이 읽힘을 바꾼 것
+      // (2026-08-03 사용자 판정) — 오염/침범으로 표시하고, 내용 불일치
+      // ('인쇄 오류')는 잉크 누락·단어 증발/출현 증거일 때만 남긴다.
+      if (f.metrics?.evidence === "added") {
+        return (f.metrics?.touch_text_px ?? 0) >= TOUCH_MIN
+          ? { ...dispLegibility } : { ...dispContam };
+      }
       const detail = f.note.split("OCR 불일치: ")[1];
       return { ktype: "인쇄 오류", severity: "critical",
                note: "인쇄 내용 불일치" + (detail ? ` (${detail})` : "") };
@@ -126,7 +147,8 @@ export interface DisplayArtifacts {
 }
 
 // 화면에 표시할 결함 목록 — 같은 결함이 잉크 diff(extra/missing)와
-// OCR(text_mismatch) 양쪽에서 잡히면 '인쇄 오류' 하나만 남긴다.
+// OCR(text_mismatch) 양쪽에서 잡히면 OCR 쪽 하나만 남긴다(표시 유형은
+// mapDisplay 가 증거 극성·글자 접촉량으로 정한다).
 export function computeDefects(findings: Finding[]): DispFinding[] {
   const textBoxes = findings
     .filter((f) => f.type === "text_mismatch")
@@ -267,7 +289,7 @@ export function feedbackCsv(results: ResultItem[]): string {
 // ---------------------------------------------------------------- 피드백 전송
 // 피드백은 맥미니 서버(feedback/feedback.jsonl)에 축적되어 오탐 튜닝의 입력이
 // 된다. 문제 부위 크롭 + 엔진 분석 데이터 + 원본 이미지(사용자 승인)를 보낸다.
-export const APP_VERSION = "2026-07-24.3";
+export const APP_VERSION = "2026-08-05.1";
 // same-origin 폴백: /app/이면 같은 서버 /feedback, hf.space 정적이면 없음.
 export function computeFeedbackEndpoints(hostname: string): string[] {
   return hostname.endsWith("hf.space") ? [] : ["/feedback"];

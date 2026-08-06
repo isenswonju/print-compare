@@ -18,6 +18,7 @@ import argparse
 import base64
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -38,6 +39,30 @@ FEEDBACK_ALLOWED_ORIGINS = {
 @app.get("/")
 def index():
     return redirect("/app/")
+
+
+@app.get("/healthz")
+def healthz():
+    """건강검진 — bench.sync 가 매일 호출한다.
+
+    프로세스 생존은 launchd KeepAlive 가 지키므로, 여기서는 "살아 있는데
+    일을 못 하는" 상태를 검사한다: 피드백 디렉터리 쓰기 가능 여부와 디스크
+    여유. 실제 쓰기까지 해봐야 읽기전용 마운트·권한 문제를 잡는다.
+    """
+    ok, error = True, ""
+    try:
+        FEEDBACK_DIR.mkdir(exist_ok=True)
+        probe = FEEDBACK_DIR / ".healthz-probe"
+        probe.write_text(time.strftime("%Y-%m-%dT%H:%M:%S"), encoding="utf-8")
+        probe.unlink()
+    except Exception as e:  # noqa: BLE001
+        ok, error = False, f"feedback 쓰기 실패: {e}"
+    free_mb = shutil.disk_usage(BASE).free // 1_000_000
+    if ok and free_mb < 500:
+        ok, error = False, f"디스크 여유 부족: {free_mb}MB"
+    body = jsonify(ok=ok, error=error, free_mb=free_mb,
+                   dist_built=(WEB_DIST / "index.html").is_file())
+    return body, (200 if ok else 503)
 
 
 # ---------------------------------------------------------------------------

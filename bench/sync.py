@@ -1,6 +1,6 @@
 """매일 도는 정확도 점검 — launchd(`com.artwork-compare.bench-sync`)가 실행한다.
 
-  0) 서비스 중인 HF Space 의 엔진 지문이 로컬과 같은지 대조한다(배포 누락 감지)
+  0) 배포 지문 대조(배포 누락 감지) + 피드백 수집 경로 건강검진
   1) 공용 보관함에 새로 올라온 아트웍을 감시 케이스로 들여온다
   2) 전 케이스를 python 엔진으로 돌려 계약이 깨졌는지 본다
   3) 새 케이스가 생겼거나 게이트가 깨졌을 때만 알림을 띄운다
@@ -62,12 +62,15 @@ def case_files() -> set[str]:
 SPACE_URL = "https://i-sens-artwork-compare.static.hf.space"
 
 
-def check_deploy() -> None:
+def check_deploy() -> bool:
     """서비스 중인 HF Space 의 엔진 지문이 로컬과 같은지 매일 대조한다.
 
     "엔진은 고쳤는데 재배포를 빠뜨림"(2026-08-05, 구엔진 오탐 45건 재판정)의
     재발 방지. 어긋나면 알림만 띄운다 — 자동 배포는 하지 않는다(빌드 검증 없이
     올리면 안전망이 아니라 사고 전파기가 된다). 재배포: tools/hf_deploy.py
+
+    반환값: 네트워크로 Space 에 도달했는가 — check_feedback_health 가
+    "오프라인"과 "상대 서버 장애"를 구분하는 데 쓴다.
     """
     import json
     import time
@@ -88,11 +91,11 @@ def check_deploy() -> None:
                    "python3 tools/hf_deploy.py 로 재배포하세요.")
         else:
             log(f"배포 지문 조회 실패(건너뜀): HTTP {e.code}")
-        return
+        return True                      # HTTP 응답 = 네트워크는 살아 있다
     except Exception as e:
         # 오프라인/HF 장애 — 배포 문제라는 증거가 아니므로 조용히 넘어간다
         log(f"배포 지문 조회 실패(건너뜀): {e}")
-        return
+        return False
 
     deployed = info.get("pipeline_hash")
     if deployed == local:
@@ -103,6 +106,57 @@ def check_deploy() -> None:
         notify("인쇄 검수 배포 ⚠️",
                "HF Space 의 엔진이 로컬과 다릅니다. "
                "python3 tools/hf_deploy.py 로 재배포하세요.")
+    return True
+
+
+COLLECT_URL = "https://inkspect-feedback.vercel.app/api/feedback"
+LOCAL_HEALTHZ = "http://127.0.0.1:8501/healthz"
+
+
+def check_feedback_health(net_ok: bool) -> None:
+    """피드백 수집 경로 건강검진 — "살아 있는데 저장이 안 되는" 상태를 잡는다.
+
+    주경로(브라우저 → Vercel inkspect-feedback)와 폴백(사내망 Flask /feedback)
+    을 모두 본다. 프로세스 죽음은 launchd KeepAlive 가 복구하므로, 여기서 잡는
+    것은 그 너머다: Vercel 장애, launchd 에이전트 언로드, 디스크/권한 문제.
+    """
+    import urllib.error
+    import urllib.request
+
+    # 1) 주경로: Vercel 수집기 도달성. HTTP 응답이면(405 라도) 살아 있는 것.
+    if net_ok:                     # 오프라인이면 오경보만 나므로 건너뛴다
+        try:
+            req = urllib.request.Request(COLLECT_URL, method="OPTIONS")
+            urllib.request.urlopen(req, timeout=15)
+            log("피드백 수집기(Vercel) 응답 정상")
+        except urllib.error.HTTPError as e:
+            if e.code >= 500:
+                log(f"피드백 수집기 5xx: {e.code}")
+                notify("인쇄 검수 피드백 ⚠️",
+                       f"Vercel 수집기가 {e.code}를 반환합니다 — "
+                       f"사용자 피드백이 유실될 수 있습니다.")
+            else:
+                log(f"피드백 수집기(Vercel) 응답 정상 (HTTP {e.code})")
+        except Exception as e:
+            log(f"피드백 수집기 접속 실패: {e}")
+            notify("인쇄 검수 피드백 ⚠️",
+                   "Vercel 수집기에 접속할 수 없습니다 — "
+                   "사용자 피드백이 유실될 수 있습니다.")
+
+    # 2) 폴백: 로컬 Flask — /healthz 가 feedback/ 실제 쓰기까지 검사한다.
+    try:
+        with urllib.request.urlopen(LOCAL_HEALTHZ, timeout=10) as resp:
+            log(f"로컬 서버 건강 정상 ({resp.read(200).decode('utf-8', 'replace').strip()})")
+    except urllib.error.HTTPError as e:
+        detail = e.read(200).decode("utf-8", "replace").strip()
+        log(f"로컬 서버 비정상: HTTP {e.code} {detail}")
+        notify("인쇄 검수 서버 ⚠️",
+               f"webapp.py 가 살아 있지만 일을 못 합니다: {detail}")
+    except Exception as e:
+        log(f"로컬 서버 접속 실패: {e}")
+        notify("인쇄 검수 서버 ⚠️",
+               "webapp.py(8501) 가 응답하지 않습니다 — "
+               "launchctl 로 com.artwork-compare.server 를 확인하세요.")
 
 
 def main(argv=None) -> int:
@@ -117,8 +171,9 @@ def main(argv=None) -> int:
     log("── 시작")
     new_cases: list[str] = []
 
-    # 0) 배포 지문 — 서비스 중인 엔진이 로컬과 같은가 (빠르고 독립적이라 먼저)
-    check_deploy()
+    # 0) 배포 지문 + 피드백 경로 건강검진 (빠르고 독립적이라 먼저)
+    net_ok = check_deploy()
+    check_feedback_health(net_ok)
 
     # 1) 보관함에서 새 아트웍
     if PW_FILE.exists():

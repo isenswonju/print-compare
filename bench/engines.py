@@ -135,14 +135,15 @@ def fingerprint(engine: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def _run_python(ref: Path, test: Path, use_ocr: bool,
-                keep: Path | None) -> EngineRun:
+                keep: Path | None, overrides: dict | None = None) -> EngineRun:
     from compare_artwork import Config, run_pipeline
 
     outdir = keep or Path(tempfile.mkdtemp(prefix="bench-py-"))
     buf = io.StringIO()
     t0 = time.time()
     with redirect_stdout(buf):
-        findings = run_pipeline(ref, test, outdir, Config(use_ocr=use_ocr))
+        findings = run_pipeline(ref, test, outdir,
+                                Config(use_ocr=use_ocr, **(overrides or {})))
     elapsed = time.time() - t0
     w, h = png_size(ref)
     return EngineRun([f.to_dict() for f in findings], w, h, elapsed,
@@ -183,10 +184,15 @@ def _run_web(ref: Path, test: Path, use_ocr: bool,
 
 
 def run_engine(engine: str, ref: Path, test: Path, use_ocr: bool = True,
-               keep: Path | None = None) -> EngineRun:
+               keep: Path | None = None,
+               config_overrides: dict | None = None) -> EngineRun:
+    """config_overrides: Config 필드 덮어쓰기 — 파라미터 스윕(tools/param_tune.py)
+    전용. python 엔진만 지원한다(웹 엔진 설정은 config.ts 에 박혀 있다)."""
     if engine == "python":
-        return _run_python(ref, test, use_ocr, keep)
+        return _run_python(ref, test, use_ocr, keep, config_overrides)
     if engine == "web":
+        if config_overrides:
+            raise ValueError("web 엔진은 config_overrides 를 지원하지 않는다")
         return _run_web(ref, test, use_ocr, keep)
     raise ValueError(f"알 수 없는 엔진: {engine} (가능: {', '.join(ENGINES)})")
 

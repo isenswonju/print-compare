@@ -204,6 +204,11 @@ stdout에 요약 테이블(번호/유형/심각도/bbox/비고)이 출력된다.
 정합·이진화 파라미터(ORB 20k, ratio 0.75, RANSAC 3.0, 타일 768/128,
 blockSize 41/C 18 등)는 실측 검증값이므로 유지를 권장.
 
+값을 바꾸기 전에 `python3 tools/param_tune.py` 를 돌려라 — 후보 값마다 전
+케이스를 채점해 제안서(`bench/out/tuning-proposal.md`)를 만든다. 목적함수는
+tune 그룹, guard(홀드아웃)는 검증 병기라 과적합을 막는다. 자동 적용은 없다 —
+적용은 Config 와 `web/src/pipeline/config.ts` 를 함께 고치는 것까지가 한 세트.
+
 ### 지시서 대비 조정 사항 (픽스처 실측 근거)
 
 - **뒷비침 규칙 보강**: 원 사양(`150<norm<225 ∧ erode(REF)>200`)은 이
@@ -280,9 +285,19 @@ git config core.hooksPath hooks      # 클론당 1회
 
 맥미니에서 **매일 03:10** 에 `bench/sync.py` 가 돈다.
 
+0. HF 배포 지문 대조(배포 누락 감지) + 피드백 수집 경로 건강검진
+   (Vercel 수집기 도달성, 로컬 `/healthz` — feedback/ 실제 쓰기 검사)
 1. 공용 보관함에 새로 올라온 아트웍을 감시 케이스로 들여오고
 2. 전 케이스를 python 엔진으로 점검하고
-3. **새 케이스가 생겼거나 게이트가 깨졌을 때만** 알림을 띄운다
+3. 실물(labeled) 케이스에서 python↔web 엔진의 계약 판정이 갈리는지 대조하고
+   (사용자가 실제로 보는 것은 web 엔진이다 — 예산 내 오탐 수 요동은 로그만)
+4. 게이트가 깨졌으면 자가수리를 시도한다 — `tools/self_repair.py` 가 격리
+   worktree 에서 Claude Code 헤드리스로 원인을 고쳐 **repair/\* 브랜치**에
+   패치를 제안한다(옵트인: `private/.self-repair-on`). push · `--accept` ·
+   배포는 하지 않는다 — 검토와 병합은 사람 몫이다.
+
+문제가 있을 때만(새 케이스·게이트 파손·배포 불일치·패리티 어긋남·수리 결과)
+알림을 띄운다.
 
 ```bash
 cp tools/com.artwork-compare.bench-sync.plist ~/Library/LaunchAgents/

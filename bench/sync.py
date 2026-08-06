@@ -3,7 +3,10 @@
   0) 배포 지문 대조(배포 누락 감지) + 피드백 수집 경로 건강검진
   1) 공용 보관함에 새로 올라온 아트웍을 감시 케이스로 들여온다
   2) 전 케이스를 python 엔진으로 돌려 계약이 깨졌는지 본다
-  3) 새 케이스가 생겼거나 게이트가 깨졌을 때만 알림을 띄운다
+  3) 실물 계약 케이스에서 python↔web 엔진 결과가 갈리는지 대조한다
+  4) 게이트 FAIL 이면 자가수리(tools/self_repair.py)로 패치 브랜치를 제안한다
+     — 옵트인(private/.self-repair-on), 병합은 사람이
+  새 케이스·게이트 파손·패리티 어긋남·수리 결과는 알림으로 띄운다
 
 저장소를 더럽히지 않는다: 이력은 남기지 않고(`--no-history`), **기준선은 절대
 자동 승인하지 않는다** — 자동으로 갱신하면 안전망이 그냥 로그가 된다. 사람이
@@ -159,6 +162,60 @@ def check_feedback_health(net_ok: bool) -> None:
                "launchctl 로 com.artwork-compare.server 를 확인하세요.")
 
 
+def check_engine_parity() -> None:
+    """python↔web 엔진 불일치 감시 — 실물(labeled) 케이스만.
+
+    벤치 게이트는 python 엔진으로 돈다. 그런데 사용자가 실제로 쓰는 것은
+    브라우저(TS/wasm) 엔진이다 — 둘이 갈리면 "게이트는 초록인데 사용자는
+    구멍을 본다". 매일 실물 계약 케이스에서 두 엔진의 채점 결과(FAIL·미검출·
+    오탐 수)를 대조하고, 갈리면 알림을 띄운다. injected/guard 케이스까지
+    돌리면 일일 점검이 너무 길어져 실물 계약만 본다.
+    """
+    from .cases import MissingImages, load_cases
+    from .engines import run_engine
+    from .score import score
+
+    if not (ROOT / "web" / "node_modules").is_dir():
+        log("web/node_modules 없음 — 패리티 감시 건너뜀")
+        return
+    diverged = []
+    for case in load_cases():
+        if case.kind != "labeled":
+            continue
+        try:
+            ref, test = case.materialize()
+        except MissingImages:
+            continue
+        try:
+            contract, fps = {}, {}
+            for eng in ("python", "web"):
+                run = run_engine(eng, ref, test, use_ocr=case.use_ocr)
+                sc = score(case, run.findings, run.ref_w)
+                # 계약 수준만 알림 대상: 실패·미검출·오탐 예산 초과.
+                # 예산 안의 오탐 수 ±1 은 판정선 근처 엔진 간 수치 요동으로
+                # 실측된 현상(Config.fade_guard 주석) — 매일 알리면 소음이다.
+                contract[eng] = (len(sc.failures), sorted(sc.missed),
+                                 max(0, len(sc.fps) - case.fp_budget))
+                fps[eng] = len(sc.fps)
+            if contract["python"] != contract["web"]:
+                py, wb = contract["python"], contract["web"]
+                diverged.append(case.id)
+                log(f"패리티 어긋남 [{case.id}] — python(실패 {py[0]}, 미검출 "
+                    f"{py[1]}, 예산 초과 {py[2]}) vs web(실패 {wb[0]}, "
+                    f"미검출 {wb[1]}, 예산 초과 {wb[2]})")
+            elif fps["python"] != fps["web"]:
+                log(f"패리티 일치 [{case.id}] — 오탐 수만 다름"
+                    f"(python {fps['python']} vs web {fps['web']}, 예산 내)")
+            else:
+                log(f"패리티 일치 [{case.id}]")
+        except Exception as e:
+            log(f"패리티 감시 실패 [{case.id}](건너뜀): {e}")
+    if diverged:
+        notify("인쇄 검수 엔진 패리티 ⚠️",
+               f"python과 web 엔진 결과가 갈립니다: {', '.join(diverged)} — "
+               f"sync.log 확인. 사용자는 web 엔진을 봅니다.")
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     today = datetime.now().strftime("%Y-%m-%d")
@@ -206,6 +263,23 @@ def main(argv=None) -> int:
         log("게이트 FAIL — bench/out/report.md 확인")
         notify("인쇄 검수 안전망 ❌",
                "정확도 게이트가 깨졌습니다. bench/out/report.md 확인")
+
+    # 3) python↔web 엔진 패리티 — 실물 계약만(약 5분). 사용자는 web 을 본다.
+    try:
+        check_engine_parity()
+    except Exception as e:
+        log(f"패리티 감시 실패(건너뜀): {e}")
+
+    # 4) 게이트가 깨졌으면 자가수리 — 패치는 repair/* 브랜치 제안까지만,
+    #    옵트인(private/.self-repair-on). 검토·병합은 사람이 한다.
+    if rc != 0:
+        try:
+            subprocess.run(
+                [sys.executable, str(ROOT / "tools" / "self_repair.py"),
+                 "--auto"], timeout=4500, cwd=ROOT)
+        except Exception as e:
+            log(f"자가수리 실행 실패: {e}")
+
     # 게이트 결과와 무관하게 "오늘 완주" 도장 — FAIL 도 이미 알림을 띄웠으므로
     # 같은 날 재부팅 때마다 25분짜리 점검을 다시 돌 이유가 없다.
     STAMP.write_text(today + "\n", encoding="utf-8")

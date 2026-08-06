@@ -87,6 +87,26 @@ def config_hash(engine: str) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:12]
 
 
+def pipeline_hash() -> str:
+    """web 엔진 소스(web/src/pipeline/) 지문 — 배포본 대조용.
+
+    vite 의 version-stamp 플러그인(web/vite.config.js)이 빌드 때 같은 계산으로
+    dist/version.json 에 박아 두고, bench.sync 와 tools/hf_deploy.py 가 이 값과
+    대조한다. 테스트 파일은 배포 엔진에 안 실리므로 제외 — 규칙을 바꾸면
+    반드시 양쪽을 함께 바꿀 것.
+    """
+    src = ROOT / "web" / "src" / "pipeline"
+    rels = sorted(p.relative_to(src).as_posix() for p in src.rglob("*")
+                  if p.is_file() and not p.name.endswith(".test.ts")
+                  and not p.name.startswith("__fixtures__"))
+    h = hashlib.sha256()
+    for rel in rels:
+        h.update(rel.encode() + b"\0")
+        h.update((src / rel).read_bytes())
+        h.update(b"\0")
+    return h.hexdigest()[:12]
+
+
 def fingerprint(engine: str) -> dict:
     fp = {"engine": engine, "config_hash": config_hash(engine), **git_state(),
           "os": f"{platform.system()} {platform.machine()}"}
@@ -171,5 +191,5 @@ def run_engine(engine: str, ref: Path, test: Path, use_ocr: bool = True,
     raise ValueError(f"알 수 없는 엔진: {engine} (가능: {', '.join(ENGINES)})")
 
 
-__all__ = ["run_engine", "fingerprint", "config_hash", "git_state", "png_size",
-           "EngineRun", "ENGINES"]
+__all__ = ["run_engine", "fingerprint", "config_hash", "pipeline_hash",
+           "git_state", "png_size", "EngineRun", "ENGINES"]

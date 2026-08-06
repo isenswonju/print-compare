@@ -10,7 +10,9 @@
 
 구성 요소:
 - `web/` — 브라우저판 (React+TS, opencv.js/tesseract.js). 재배포:
-  `cd web && npm run build` 후 huggingface_hub `upload_folder(dist)`.
+  `python3 tools/hf_deploy.py` (빌드→업로드→실서비스 지문 검증까지 한 명령).
+  엔진 수정은 재배포까지가 한 세트다 — 빠뜨리면 매일 03:10 `bench.sync`가
+  배포 지문(`version.json`) 불일치 알림으로 잡는다.
   원본 보관함은 IndexedDB에 두고 공용 서버(`inkspect-feedback`의 `/api/library`)와
   파일 단위로 증분 동기화한다. 규모 한계는 `npm run bench:library`로 실측
   (자세한 값은 `docs/원본보관함-영구저장-계획.md` §4-2).

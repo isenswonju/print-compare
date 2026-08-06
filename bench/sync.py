@@ -1,5 +1,6 @@
 """매일 도는 정확도 점검 — launchd(`com.artwork-compare.bench-sync`)가 실행한다.
 
+  0) 서비스 중인 HF Space 의 엔진 지문이 로컬과 같은지 대조한다(배포 누락 감지)
   1) 공용 보관함에 새로 올라온 아트웍을 감시 케이스로 들여온다
   2) 전 케이스를 python 엔진으로 돌려 계약이 깨졌는지 본다
   3) 새 케이스가 생겼거나 게이트가 깨졌을 때만 알림을 띄운다
@@ -58,6 +59,52 @@ def case_files() -> set[str]:
     return {p.name for p in CASE_DIR.glob("*.json")}
 
 
+SPACE_URL = "https://i-sens-artwork-compare.static.hf.space"
+
+
+def check_deploy() -> None:
+    """서비스 중인 HF Space 의 엔진 지문이 로컬과 같은지 매일 대조한다.
+
+    "엔진은 고쳤는데 재배포를 빠뜨림"(2026-08-05, 구엔진 오탐 45건 재판정)의
+    재발 방지. 어긋나면 알림만 띄운다 — 자동 배포는 하지 않는다(빌드 검증 없이
+    올리면 안전망이 아니라 사고 전파기가 된다). 재배포: tools/hf_deploy.py
+    """
+    import json
+    import time
+    import urllib.request
+    from .engines import pipeline_hash
+
+    local = pipeline_hash()
+    url = f"{SPACE_URL}/version.json?t={int(time.time())}"
+    try:
+        req = urllib.request.Request(url, headers={"Cache-Control": "no-cache"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            info = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            log("배포본에 version.json 이 없다 — version-stamp 이전 배포")
+            notify("인쇄 검수 배포 ⚠️",
+                   "HF Space 배포본이 낡았습니다(지문 없음). "
+                   "python3 tools/hf_deploy.py 로 재배포하세요.")
+        else:
+            log(f"배포 지문 조회 실패(건너뜀): HTTP {e.code}")
+        return
+    except Exception as e:
+        # 오프라인/HF 장애 — 배포 문제라는 증거가 아니므로 조용히 넘어간다
+        log(f"배포 지문 조회 실패(건너뜀): {e}")
+        return
+
+    deployed = info.get("pipeline_hash")
+    if deployed == local:
+        log(f"배포 지문 일치 ({local}, git {info.get('git')})")
+    else:
+        log(f"배포 지문 불일치 — 서비스 {deployed}(git {info.get('git')}), "
+            f"로컬 {local}")
+        notify("인쇄 검수 배포 ⚠️",
+               "HF Space 의 엔진이 로컬과 다릅니다. "
+               "python3 tools/hf_deploy.py 로 재배포하세요.")
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     today = datetime.now().strftime("%Y-%m-%d")
@@ -69,6 +116,9 @@ def main(argv=None) -> int:
 
     log("── 시작")
     new_cases: list[str] = []
+
+    # 0) 배포 지문 — 서비스 중인 엔진이 로컬과 같은가 (빠르고 독립적이라 먼저)
+    check_deploy()
 
     # 1) 보관함에서 새 아트웍
     if PW_FILE.exists():

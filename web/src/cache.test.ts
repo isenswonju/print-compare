@@ -5,7 +5,8 @@ import {
   getRefWords, hashFile, importLibrary, listArtworkHashes, listArtworks,
   listSections, listTombstones, loadSession, mergeManifests, moveSection,
   putRefWords, putSections, renameSection, replaceTombstones,
-  requestPersistentStorage, saveArtwork, saveArtworkBlob,
+  requestPersistentStorage, saveArtwork, saveArtworkBlob, setArtworkPrep,
+  getArtworkPrep,
   saveSession, setArtworkSection, storageEstimate,
   type LibraryManifest, type StoredSet,
 } from "./cache.ts";
@@ -220,7 +221,7 @@ describe("서버 동기화용 매니페스트(v2)", () => {
     expect(e.section).toBe(sec!.id);
     // 본체(blob/base64)는 매니페스트에 들어가지 않는다 — 이게 v1과의 차이
     expect(Object.keys(e).sort())
-      .toEqual(["hash", "name", "section", "size", "type", "updatedAt"]);
+      .toEqual(["hash", "name", "prep", "section", "size", "type", "updatedAt"]);
     expect(m.sections.some((s) => s.id === sec!.id)).toBe(true);
   });
 
@@ -494,5 +495,36 @@ describe("cache — 경계·방어 분기", () => {
     const r = await importLibrary(backup as any);
     expect(r.sections).toBe(0);
     expect((await listArtworks()).some((a) => a.hash === "noSecArt")).toBe(true);
+  });
+});
+
+// 전처리 확정값은 아트웍 해시에 붙어 매니페스트로 동기화된다 —
+// 원판 100종을 팀에서 한 번씩만 확인하면 되게 하는 핵심 계약이다.
+describe("아트웍 전처리 확정값", () => {
+  it("저장·조회되고 매니페스트에 실린다", async () => {
+    await saveArtwork("prep1", file("원판.pdf", "P"));
+    expect(await getArtworkPrep("prep1")).toBeUndefined();
+    const s = { hiddenLayers: ["11R"], label: { x: 0.1, y: 0.2, w: .5, h: .3 },
+                excluded: [{ x: 0.1, y: 0.1, w: 0.2, h: 0.2 }], at: 123 };
+    await setArtworkPrep("prep1", s);
+    expect(await getArtworkPrep("prep1")).toEqual(s);
+    const m = await exportManifest();
+    expect(m.artworks.find((a) => a.hash === "prep1")!.prep).toEqual(s);
+    await deleteArtwork("prep1");
+    await replaceTombstones({ artworks: {}, sections: {} });
+  });
+
+  it("서버에서 받은 확정값이 로컬에 반영된다(팀 공유 경로)", async () => {
+    await saveArtwork("prep2", file("원판2.pdf", "Q"));
+    const s = { hiddenLayers: ["9R"], at: 456 };
+    await applyManifestToLocal({
+      version: 3, exportedAt: 1, sections: [],
+      artworks: [{ hash: "prep2", name: "원판2.pdf", size: 1,
+                   type: "application/pdf", prep: s, updatedAt: 999 }],
+      deleted: { artworks: {}, sections: {} },
+    }, new Map([["prep2", "https://x/prep2"]]));
+    expect(await getArtworkPrep("prep2")).toEqual(s);
+    await deleteArtwork("prep2");
+    await replaceTombstones({ artworks: {}, sections: {} });
   });
 });

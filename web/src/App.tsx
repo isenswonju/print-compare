@@ -17,6 +17,8 @@ import { applySetName, buildErrorReport, buildFeedbackPayload, copyToClipboard,
 import { hasLibraryServer, syncLibraryWithServer,
          type SyncProgress } from "./server-library.ts";
 import { runAll, type RunSet } from "./runner.ts";
+import { proposePrep, rasterWithPrep, savedPrep, saveSetting, toSetting,
+         type PrepProposal } from "./artwork-flow.ts";
 import { ensureRasterPages } from "./pipeline/pdf.ts";
 import { branding } from "./branding.ts";
 import type { FileEntry, ResultItem, SetFb } from "./types.ts";
@@ -100,6 +102,13 @@ export default function App() {
   const [analyzedAt, setAnalyzedAt] = useState<number | null>(null);
   // PDF 변환 중인 드롭존 키(`id:ref`/`id:test`) — 변환 끝날 때까지 검수 시작 차단
   const [converting, setConverting] = useState<Record<string, boolean>>({});
+  // 아트웍 정리 확인 — 원판에서 설명 요소를 걷어낼지 사용자가 한 번 정한다.
+  // 확정값은 아트웍 해시에 붙어 공용 보관함으로 팀에 퍼진다(원판당 1회).
+  const [prepAsk, setPrepAsk] =
+    useState<{ pairId: number; proposal: PrepProposal } | null>(null);
+  const [prepLayers, setPrepLayers] = useState<string[]>([]);
+  const [prepCand, setPrepCand] = useState(-1);
+  const [prepBusy, setPrepBusy] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // 저장된 세션 스냅샷 — 피드백만 바뀔 때 이미지 재직렬화를 피하려고 들고 있는다
   const storedRef = useRef<StoredSet[] | null>(null);
@@ -151,7 +160,15 @@ export default function App() {
     try {
       const newEntries: FileEntry[] = [];
       for (const file of files) {
-        const pages = await ensureRasterPages(file, undefined, pushLog);
+        // 원본 면은 이미 확정된 전처리가 있으면 그대로 적용해 넣는다.
+        // 확정된 게 없으면 평소대로 넣고, 아래에서 정리 제안을 띄운다.
+        const prep = which === "ref"
+          ? await hashFile(file).then(savedPrep).catch(() => undefined)
+          : undefined;
+        const pages = prep
+          ? await rasterWithPrep(file, prep, undefined, pushLog)
+          : await ensureRasterPages(file, undefined, pushLog);
+        if (prep) pushLog(`[정리] ${file.name} — 저장된 아트웍 정리 설정 적용`);
         newEntries.push({ name: file.name, file, pages });
       }
       newEntries.sort((a, b) => a.name.localeCompare(b.name, "ko"));
@@ -171,6 +188,9 @@ export default function App() {
           hashFile(e.file).then((h) => saveArtwork(h, e.file)).catch(() => {})));
         await refreshLibrary();
         scheduleSync();
+        // 아직 정리 설정이 없는 원판이면 제안을 띄운다(파일 1개일 때만 —
+        // 여러 장을 한꺼번에 물어보면 흐름이 끊긴다).
+        if (newEntries.length === 1) askPrep(id, newEntries[0].file);
       }
     } catch (err) {
       setError(`파일 처리 실패: ` + String((err as Error).message || err));
@@ -178,6 +198,54 @@ export default function App() {
       setConverting((c) => { const n = { ...c }; delete n[key]; return n; });
     }
   };
+  // 원판 정리 제안 — 이미 확정된 게 있으면 묻지 않는다(팀에서 한 번만 정한다).
+  const askPrep = async (pairId: number, file: File) => {
+    try {
+      const hash = await hashFile(file).catch(() => "");
+      if (hash && (await savedPrep(hash))) return;
+      const proposal = await proposePrep(file, pushLog);
+      // 걷어낼 것도, 고를 후보도 없으면 물어볼 이유가 없다.
+      const hasLayer = proposal.layers.some((l) => l.annotationLike);
+      if (!hasLayer && proposal.suggested < 0 && proposal.candidates.length < 2)
+        return;
+      setPrepLayers(proposal.layers.filter((l) => l.annotationLike)
+                                   .map((l) => l.id));
+      setPrepCand(proposal.suggested);
+      setPrepAsk({ pairId, proposal });
+    } catch (e) {
+      pushLog("[정리] 아트웍 분석 실패(원본 그대로 진행): " +
+        String((e as Error).message || e));
+    }
+  };
+
+  // 확정 — 설정을 보관함에 저장(동기화로 팀 전체에 전파)하고 세트에 다시 넣는다.
+  const applyPrep = async (useIt: boolean) => {
+    if (!prepAsk) return;
+    const { pairId, proposal } = prepAsk;
+    setPrepBusy(true);
+    try {
+      const setting = useIt
+        ? toSetting(proposal, prepLayers, prepCand)
+        : { at: Date.now() }; // "원본 그대로" 도 확정이다 — 다시 묻지 않는다
+      await saveSetting(proposal.hash, setting);
+      await refreshLibrary();
+      scheduleSync();
+      if (useIt) {
+        const pages = await rasterWithPrep(
+          proposal.file, setting, undefined, pushLog);
+        setPairs((ps) => ps.map((p) => p.id === pairId
+          ? { ...p, ref: p.ref.map((e) => e.file === proposal.file
+              ? { ...e, pages } : e) } : p));
+        pushLog(`[정리] ${proposal.file.name} — 라벨만 남겨 적용했습니다.`);
+      }
+      setPrepAsk(null);
+    } catch (e) {
+      setError("아트웍 정리 실패: " + String((e as Error).message || e));
+    } finally {
+      setPrepBusy(false);
+    }
+  };
+
   const removeEntry = (id: number, which: "ref" | "test", name: string) =>
     setPairs((ps) => ps.map((p) =>
       p.id === id ? { ...p, [which]: p[which].filter((e) => e.name !== name) } : p));
@@ -929,6 +997,101 @@ export default function App() {
     );
   };
 
+  // 아트웍 정리 확인 모달 — 무엇을 걷어낼지 눈으로 보고 확정한다.
+  // 미리보기는 페이지 위에 "고른 라벨 = 실선, 지울 영역 = 빗금"으로 겹쳐 그린다.
+  const prepModal = prepAsk && (() => {
+    const p = prepAsk.proposal;
+    const cand = prepCand >= 0 ? p.candidates[prepCand] : null;
+    const mmw = (px: number) => (px / 150 * 25.4).toFixed(0); // PREVIEW_DPI=150
+    return (
+      <div className="modal-back" onClick={() => !prepBusy && setPrepAsk(null)}>
+        <div className="modal prep-modal" onClick={(e) => e.stopPropagation()}>
+          <h3>아트웍 정리 — {p.file.name}</h3>
+          <p className="admin-hint">
+            원판에는 실물 인쇄에 없는 설명 요소(색상 견본·재단선·치수·가변
+            데이터 자리)가 들어 있습니다. 걷어낼 것을 확인해주세요.{" "}
+            <b>한 번만 정하면 이 원판에 대해 팀 전체가 같은 설정을 씁니다.</b>
+          </p>
+          <div className="prep-body">
+            <div className="prep-preview">
+              <img src={URL.createObjectURL(p.page)} alt="원판 미리보기" />
+              <svg viewBox={`0 0 ${p.pageW} ${p.pageH}`} preserveAspectRatio="none">
+                <defs>
+                  <pattern id="hatch" width="8" height="8"
+                           patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <line x1="0" y1="0" x2="0" y2="8" stroke="#c0392b" strokeWidth="4" />
+                  </pattern>
+                </defs>
+                {p.candidates.map((c, i) => (
+                  <rect key={i} x={c.x} y={c.y} width={c.w} height={c.h}
+                        className={"prep-cand" + (i === prepCand ? " on" : "")}
+                        onClick={() => setPrepCand(i === prepCand ? -1 : i)} />
+                ))}
+                {cand && p.excluded.map((e, i) => (
+                  <rect key={"e" + i} x={cand.x + e.x} y={cand.y + e.y}
+                        width={e.w} height={e.h} fill="url(#hatch)"
+                        opacity="0.5" pointerEvents="none" />
+                ))}
+              </svg>
+            </div>
+            <div className="prep-side">
+              {p.layers.length > 0 && (
+                <>
+                  <b>PDF 레이어</b>
+                  <p className="note">끌 레이어를 고르세요. 설명 요소로 읽히는
+                    이름은 미리 체크해 뒀습니다.</p>
+                  {p.layers.map((l) => (
+                    <label key={l.id} className="prep-layer">
+                      <input type="checkbox"
+                        checked={prepLayers.includes(l.id)}
+                        onChange={(e) => setPrepLayers((cur) => e.target.checked
+                          ? [...cur, l.id] : cur.filter((x) => x !== l.id))} />
+                      {" "}{l.name}
+                      {l.annotationLike && <span className="note"> · 설명 요소</span>}
+                    </label>
+                  ))}
+                </>
+              )}
+              <b>라벨 영역</b>
+              {p.candidates.length === 0 ? (
+                <p className="note">자를 후보를 찾지 못했습니다 — 페이지 전체를 씁니다.</p>
+              ) : (
+                <>
+                  <p className="note">미리보기에서 상자를 눌러 바꿀 수 있습니다.</p>
+                  {p.candidates.map((c, i) => (
+                    <label key={i} className="prep-layer">
+                      <input type="radio" name="cand" checked={i === prepCand}
+                             onChange={() => setPrepCand(i)} />
+                      {" "}후보 {i + 1} — {mmw(c.w)}×{mmw(c.h)}mm
+                      {i === p.suggested && <span className="note"> · 추천</span>}
+                    </label>
+                  ))}
+                  <label className="prep-layer">
+                    <input type="radio" name="cand" checked={prepCand === -1}
+                           onChange={() => setPrepCand(-1)} />
+                    {" "}자르지 않음(페이지 전체)
+                  </label>
+                </>
+              )}
+              {prepCand >= 0 && prepCand === p.suggested && p.excluded.length > 0 && (
+                <p className="note">라벨 안의 설명 요소 {p.excluded.length}곳을
+                  지웁니다(빗금). 가변 데이터 칸이라 실물에서도 비어 있습니다.</p>
+              )}
+            </div>
+          </div>
+          <div className="modal-btns">
+            <span style={{ flex: 1 }} />
+            <button type="button" className="rm" disabled={prepBusy}
+                    onClick={() => applyPrep(false)}>원본 그대로 쓰기</button>
+            <button type="button" className="go save" disabled={prepBusy}
+                    onClick={() => applyPrep(true)}>
+              {prepBusy ? "적용 중…" : "이대로 정리해서 쓰기"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  })();
+
   const gnb = (
     <nav className="gnb">
       <div className="gnb-inner">
@@ -1279,6 +1442,7 @@ export default function App() {
     <>
       {gnb}
       {adminModal}
+      {prepModal}
       {/* 검수 중에는 페이지 전체를 잠근다 — 버튼·드롭존이 실제로 비활성일 뿐
           아니라 마우스 커서도 '클릭 불가'로 바뀌어 한눈에 알 수 있게 한다. */}
       <div className={"shell" + (running ? " locked" : "")}>

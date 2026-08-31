@@ -813,3 +813,25 @@ details summary { cursor: pointer; }
   font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
 .admin-ua { font-size: 0.7rem; color: #bbb; margin-top: 2px; word-break: break-all; }
 .rm.danger { border-color: var(--red); color: #fff; background: var(--red); }
+
+/* ---- 아트웍 정리 확인 모달 ----
+   원판에서 무엇을 걷어낼지 눈으로 보고 확정한다. 왼쪽은 페이지 미리보기에
+   후보/제외 영역을 겹쳐 그린 것, 오른쪽은 레이어·후보 선택. */
+.prep-modal { max-width: 900px; width: 92vw; }
+.prep-body { display: grid; grid-template-columns: 1fr 260px; gap: 14px;
+  margin: 10px 0; align-items: start; }
+@media (max-width: 720px) { .prep-body { grid-template-columns: 1fr; } }
+.prep-preview { position: relative; border: 1px solid var(--line);
+  border-radius: 8px; overflow: hidden; background: #fff; }
+.prep-preview img { display: block; width: 100%; height: auto; }
+.prep-preview svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* 후보 상자 — 누르면 그 후보로 바뀐다 */
+.prep-cand { fill: rgba(21, 101, 192, 0.06); stroke: #1565c0;
+  stroke-width: 3; stroke-dasharray: 10 6; cursor: pointer; }
+.prep-cand:hover { fill: rgba(21, 101, 192, 0.14); }
+.prep-cand.on { fill: rgba(21, 101, 192, 0.1); stroke: var(--red);
+  stroke-width: 5; stroke-dasharray: none; }
+.prep-side { display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; }
+.prep-side b { margin-top: 6px; }
+.prep-side .note { margin: 0 0 2px; line-height: 1.4; }
+.prep-layer { display: block; cursor: pointer; padding: 2px 0; }

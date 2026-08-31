@@ -23,11 +23,30 @@ const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // OCR 설정이 바뀌면 키가 달라져 옛 캐시를 자연 무효화한다
 export const OCR_CACHE_VER = "v1-eng-best-psm3";
 
+// 아트웍 전처리 확정값 — "이 원판에서 무엇이 라벨이고 무엇이 설명 요소인가".
+// 아트웍 해시에 붙어 매니페스트로 동기화되므로 **팀에서 한 번만 확정하면**
+// 모든 사람·모든 기기가 같은 설정을 쓴다(원판이 100종이라 자동 판정에만
+// 기대지 않고 사람이 한 번 확인하는 구조를 택했다).
+// 좌표는 dpi가 바뀌어도 살아 있도록 전부 비율(0~1)로 둔다.
+export interface FracRect { x: number; y: number; w: number; h: number }
+
+export interface ArtworkPrepSetting {
+  /** 끄고 래스터화할 PDF 레이어 id(레이어가 있는 원판만). */
+  hiddenLayers?: string[];
+  /** 라벨 영역 — 페이지 대비 비율. 없으면 자르지 않는다. */
+  label?: FracRect;
+  /** 지울 설명 요소 — label 영역 대비 비율. */
+  excluded?: FracRect[];
+  /** 확정 시각. 매니페스트 병합에서 최신값이 이긴다. */
+  at: number;
+}
+
 export interface ArtworkEntry {
   hash: string;
   name: string;
   size: number;
   type: string;
+  prep?: ArtworkPrepSetting;
   // 파일 본체. 서버에서 목록만 받아온 항목은 blob 없이 url만 갖고 있다가
   // 실제로 쓸 때(검수 투입 등) 내려받아 채운다.
   blob?: Blob;
@@ -204,6 +223,27 @@ export async function deleteArtwork(hash: string): Promise<void> {
     await tx("artworks", "readwrite", (s) => s.delete(hash));
     await putTombstone("artworks", hash);
   } catch { /* 무시 */ }
+}
+
+// 전처리 확정값 저장 — updatedAt을 올려 동기화에서 최신값으로 퍼지게 한다.
+export async function setArtworkPrep(
+  hash: string, prep: ArtworkPrepSetting): Promise<void> {
+  try {
+    const rec = await tx<Omit<ArtworkEntry, "hash">>(
+      "artworks", "readonly", (s) => s.get(hash));
+    if (!rec) return;
+    await tx("artworks", "readwrite", (s) =>
+      s.put({ ...rec, prep, updatedAt: Date.now() }, hash));
+  } catch { /* 무시 */ }
+}
+
+export async function getArtworkPrep(
+  hash: string): Promise<ArtworkPrepSetting | undefined> {
+  try {
+    const rec = await tx<Omit<ArtworkEntry, "hash">>(
+      "artworks", "readonly", (s) => s.get(hash));
+    return rec?.prep;
+  } catch { return undefined; }
 }
 
 export async function setArtworkSection(
@@ -475,6 +515,7 @@ export interface ArtworkMeta {
   size: number;
   type: string;
   section?: string;
+  prep?: ArtworkPrepSetting; // 전처리 확정값 — 한 번 정하면 팀 전체가 쓴다
   updatedAt?: number; // 삭제 기록과 승부 — 삭제 이후 재추가만 살아남는다
 }
 
@@ -496,7 +537,7 @@ export async function exportManifest(): Promise<LibraryManifest> {
     sections: secs,
     artworks: arts.map((a) => ({ hash: a.hash, name: a.name, size: a.size,
                                  type: a.type, section: a.section,
-                                 updatedAt: a.updatedAt })),
+                                 prep: a.prep, updatedAt: a.updatedAt })),
     deleted: dead,
   };
 }
@@ -560,21 +601,21 @@ export async function applyManifestToLocal(
     const cur = local.get(a.hash);
     const url = serverUrls.get(a.hash) ?? cur?.url;
     if (cur) {
-      // 메타데이터(이름·폴더·URL)만 맞춘다 — blob은 그대로 둔다.
+      // 메타데이터(이름·폴더·전처리 확정값·URL)만 맞춘다 — blob은 그대로 둔다.
       if (cur.name === a.name && cur.section === a.section && cur.url === url &&
           cur.updatedAt === a.updatedAt) continue;
       const { hash, ...rest } = cur;
       await tx("artworks", "readwrite", (s) =>
         s.put({ ...rest, name: a.name, section: a.section, url,
-                updatedAt: a.updatedAt }, hash));
+                prep: a.prep ?? cur.prep, updatedAt: a.updatedAt }, hash));
     } else {
       // 새 항목 — 목록에만 추가(blob 없음). 서버에 본체가 없으면(예외 상황)
       // 내려받을 길이 없으므로 목록에도 넣지 않는다.
       if (!url) continue;
       await tx("artworks", "readwrite", (s) =>
         s.put({ name: a.name, size: a.size, type: a.type, url,
-                lastUsed: 0, section: a.section, updatedAt: a.updatedAt },
-              a.hash));
+                lastUsed: 0, section: a.section, prep: a.prep,
+                updatedAt: a.updatedAt }, a.hash));
     }
   }
 }

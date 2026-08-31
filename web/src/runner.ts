@@ -4,6 +4,7 @@
 import { hashFile, getRefWords, putRefWords } from "./cache.ts";
 import { buildDisplayArtifacts, fileToImageData, imageDataToCanvas,
          ocrCanvas } from "./lib.ts";
+import type { ArtworkPrep } from "./pipeline/artwork-prep.ts";
 import type { OcrWords, PipelineResult, ResultItem, Word } from "./types.ts";
 
 // 한 세트(품목) = 원본 페이지들 ↔ 인쇄물 페이지들(같은 장수). 세트는 페이지
@@ -143,6 +144,51 @@ function detectInWorker(refImg: ImageData, testImg: ImageData,
       },
       [refBuf, testBuf],
     );
+  });
+}
+
+// ------------------------------------------------------------ 아트웍 전처리
+// 원판 아트웍에는 실물에 없는 설명 요소(PANTONE 견본·범례·치수 문구·가변
+// 데이터 자리 표시)가 들어 있고, 라벨이 2벌인 경우도 있다. 워커에서 분석해
+// "라벨만 남긴 정리본"을 만들어 준다 — 적용 여부는 사용자가 정한다.
+export interface PreppedArtwork {
+  prep: ArtworkPrep;
+  file: File;        // 정리본 PNG
+  width: number;
+  height: number;
+}
+
+export function prepareArtwork(
+  file: File, log: (m: string) => void = () => {}): Promise<PreppedArtwork> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(
+      new URL("./pipeline/cv.worker.ts", import.meta.url));
+    const bye = () => worker.terminate();
+    worker.onmessage = async (e) => {
+      const msg = e.data;
+      if (msg.type === "log") log(msg.msg);
+      else if (msg.type === "error") { bye(); reject(new Error(msg.msg)); }
+      else if (msg.type === "prepped") {
+        bye();
+        try {
+          const img = new ImageData(
+            new Uint8ClampedArray(msg.buf), msg.w, msg.h);
+          const c = imageDataToCanvas(img);
+          const blob = await new Promise<Blob | null>(
+            (r) => c.toBlob(r, "image/png"));
+          if (!blob) throw new Error("정리본 이미지 생성 실패");
+          const name = file.name.replace(/\.[^.]+$/, "") + "-정리본.png";
+          resolve({ prep: msg.prep, width: msg.w, height: msg.h,
+                    file: new File([blob], name, { type: "image/png" }) });
+        } catch (err) { reject(err as Error); }
+      }
+    };
+    worker.onerror = (e) => { bye(); reject(new Error(e.message || "worker 오류")); };
+    fileToImageData(file).then((img) => {
+      const buf = img.data.buffer;
+      worker.postMessage(
+        { type: "prep", img: { buf, w: img.width, h: img.height } }, [buf]);
+    }).catch((e) => { bye(); reject(e); });
   });
 }
 

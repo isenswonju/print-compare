@@ -42,10 +42,54 @@ export async function pdfPageCount(file: File): Promise<number> {
   }
 }
 
+// ---------------------------------------------------------------- 레이어(OCG)
+// 원판 아트웍은 재단선·가변 데이터 자리 표시 같은 설명 요소를 **별도 레이어**에
+// 두는 경우가 많다(실측: i-SENS 라벨 4종 중 2종이 'Dieline',
+// 'No varnish area', 'Printing/Labeling area' 레이어를 갖고 있었다).
+// 레이어를 끄고 래스터화하면 벡터 단계에서 정확히 빠진다 — 픽셀 휴리스틱보다
+// 훨씬 믿을 만하다. 레이어가 없는(평탄화된) 파일은 artwork-prep.ts의
+// 색·여백 기반 경로로 넘어간다.
+export interface PdfLayer {
+  id: string;
+  name: string;
+  /** 이름이 설명 요소로 읽히는가 — 화면에서 기본 체크 상태로 쓴다. */
+  annotationLike: boolean;
+}
+
+// 이름으로 설명 요소를 짐작한다. 아트웍이 100종 규모라 이름은 언제든 새로
+// 나올 수 있으므로 **자동 확정이 아니라 기본 체크**로만 쓰고, 최종 판단은
+// 사용자가 한다(고른 결과는 아트웍 해시에 붙어 팀 전체에 공유된다).
+const ANNOT_LAYER = /die\s*-?line|cut\s*line|varnish|printing\s*\/?\s*labeling|labeling\s*area|printing\s*area|guide|dimension|bleed|trim|safety|재단|도무송|규격|가이드|치수/i;
+
+export const classifyLayerName = (name: string): boolean =>
+  ANNOT_LAYER.test(name);
+
+export async function listPdfLayers(file: File): Promise<PdfLayer[]> {
+  if (!isPdf(file)) return [];
+  const pdfjs = await loadPdfjs();
+  const data = new Uint8Array(await file.arrayBuffer());
+  const loadingTask = pdfjs.getDocument({ data });
+  try {
+    const pdf = await loadingTask.promise;
+    const cfg = await pdf.getOptionalContentConfig();
+    // v6의 OptionalContentConfig는 [id, group] 쌍을 순회한다(getGroups()는 없다 —
+    // 있는 줄 알고 옵셔널 호출로 뒀다가 레이어를 통째로 놓쳤었다).
+    const rows: [string, { name?: string }][] = cfg ? [...cfg] : [];
+    return rows.map(([id, g]) => {
+      const name = String(g?.name ?? id);
+      return { id, name, annotationLike: classifyLayerName(name) };
+    });
+  } catch { return []; }
+  finally { loadingTask.destroy(); }
+}
+
 // 로드된 PDF 페이지 하나를 지정 dpi(캔버스 한계 내)로 렌더해 PNG Blob으로.
+// hidden: 끌 레이어 id 목록(선택) — 그 레이어의 그림은 렌더되지 않는다.
 async function renderPage(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   page: any, dpi: number, onLog?: (m: string) => void,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ocConfig?: any,
 ): Promise<Blob> {
   let scale = dpi / PDF_DPI;
   const base = page.getViewport({ scale: 1 });
@@ -61,7 +105,9 @@ async function renderPage(
   canvas.width = Math.round(viewport.width);
   canvas.height = Math.round(viewport.height);
   // 스캔지는 흰 바탕 — PDF의 투명 배경을 흰색으로 채워 정합/이진화와 정합성 유지
-  await page.render({ canvas, viewport, background: "#ffffff" }).promise;
+  await page.render({ canvas, viewport, background: "#ffffff",
+                      optionalContentConfigPromise: ocConfig
+                        ? Promise.resolve(ocConfig) : undefined }).promise;
   const blob = await new Promise<Blob | null>((res) =>
     canvas.toBlob(res, "image/png"));
   if (!blob) throw new Error("PDF 렌더 결과를 이미지로 만들지 못했습니다.");
@@ -84,26 +130,35 @@ export function rasterizePdfPages(
   file: File,
   dpi: number = DEFAULT_DPI,
   onLog?: (m: string) => void,
+  hiddenLayers?: string[],
 ): Promise<File[]> {
-  return serialize(() => rasterizePdfPagesInner(file, dpi, onLog));
+  return serialize(() =>
+    rasterizePdfPagesInner(file, dpi, onLog, hiddenLayers));
 }
 
 async function rasterizePdfPagesInner(
   file: File,
   dpi: number,
   onLog?: (m: string) => void,
+  hiddenLayers?: string[],
 ): Promise<File[]> {
   const pdfjs = await loadPdfjs();
   const data = new Uint8Array(await file.arrayBuffer());
   const loadingTask = pdfjs.getDocument({ data });
   try {
     const pdf = await loadingTask.promise;
+    let ocConfig;
+    if (hiddenLayers?.length) {
+      ocConfig = await pdf.getOptionalContentConfig();
+      for (const id of hiddenLayers) ocConfig?.setVisibility(id, false);
+      onLog?.(`[PDF] 레이어 ${hiddenLayers.length}개를 끄고 렌더합니다.`);
+    }
     const n = pdf.numPages;
     const base = file.name.replace(/\.pdf$/i, "");
     const out: File[] = [];
     for (let i = 1; i <= n; i++) {
       const page = await pdf.getPage(i);
-      const blob = await renderPage(page, dpi, onLog);
+      const blob = await renderPage(page, dpi, onLog, ocConfig);
       const name = n > 1 ? `${base}-p${i}.png` : `${base}.png`;
       out.push(new File([blob], name, { type: "image/png" }));
     }

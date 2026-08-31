@@ -5,6 +5,7 @@
 // OCR(tesseract.js)은 메인 스레드가 자체 워커로 병렬 실행 후 'ocr' 메시지로 회신.
 import { runPipeline } from "./engine.ts";
 import { detectInstances } from "./multisample.ts";
+import { analyzeArtwork, applyPrep } from "./artwork-prep.ts";
 import type { CV, OcrWords } from "../types.ts";
 
 declare function importScripts(...urls: string[]): void;
@@ -109,6 +110,23 @@ ctx.onmessage = async (e: MessageEvent) => {
         (m) => ctx.postMessage({ type: "log", msg: m }),
       );
       ctx.postMessage({ type: "detected", rects });
+    } catch (err) {
+      ctx.postMessage({ type: "error", msg: describeError(err),
+                        stage: lastStage });
+    }
+  } else if (msg.type === "prep") {
+    // 아트웍 전처리 분석 — 라벨 영역과 지울 설명 요소를 찾아 정리본까지 만든다.
+    lastStage = "아트웍 정리";
+    try {
+      const { cv } = await cvReady;
+      const img = { data: new Uint8ClampedArray(msg.img.buf),
+                    width: msg.img.w, height: msg.img.h };
+      const prep = analyzeArtwork(cv, img);
+      const cleaned = applyPrep(img, prep);
+      const buf = cleaned.data.buffer;
+      (ctx.postMessage as (m: unknown, t: Transferable[]) => void)(
+        { type: "prepped", prep, w: cleaned.width, h: cleaned.height, buf },
+        [buf]);
     } catch (err) {
       ctx.postMessage({ type: "error", msg: describeError(err),
                         stage: lastStage });

@@ -241,4 +241,76 @@ describe("cache — IndexedDB 실패 방어", () => {
     expect(await m.listArtworks()).toEqual([]); // 열림 성공
     expect(created).toEqual([]);                // 이미 있으므로 생성 0
   });
+
+  // v3→v4 업그레이드에서 실제로 겪은 사고: 다른 탭이 옛 버전으로 DB를 붙들고
+  // 있으면 open이 성공도 실패도 하지 않고 영원히 매달려 보관함이 통째로 멈췄다.
+  it("onblocked: 무한 대기 대신 즉시 폴백하고, 다음 호출은 다시 시도한다", async () => {
+    let opens = 0;
+    let blockNext = true;
+    const store: Any = {
+      openCursor: () => {
+        const r: Any = { onsuccess: null, onerror: null, result: null };
+        queueMicrotask(() => r.onsuccess && r.onsuccess());
+        return r;
+      },
+    };
+    const db: Any = {
+      objectStoreNames: { contains: () => true },
+      transaction: () => ({ objectStore: () => store, oncomplete: null,
+                            onerror: null }),
+    };
+    const idb: Any = {
+      open() {
+        opens++;
+        const req: Any = { result: db, onerror: null, onsuccess: null,
+          onblocked: null, onupgradeneeded: null };
+        queueMicrotask(() => {
+          // 첫 시도는 다른 탭에 막히고, 그 탭이 닫힌 뒤의 재시도는 성공한다.
+          if (blockNext) { blockNext = false; req.onblocked && req.onblocked(); }
+          else req.onsuccess && req.onsuccess();
+        });
+        return req;
+      },
+    };
+    vi.stubGlobal("indexedDB", idb);
+    const m = await import("./cache.ts");
+    // 매달리지 않고 폴백값이 나온다(테스트가 타임아웃되면 회귀).
+    expect(await m.listArtworks()).toEqual([]);
+    expect(opens).toBe(1);
+    // 실패한 연결을 캐시해두면 새로고침 전까지 영구 실패한다 — 재시도돼야 한다.
+    expect(await m.listArtworks()).toEqual([]);
+    expect(opens).toBe(2);
+  });
+
+  it("onversionchange: 다른 탭의 업그레이드를 막지 않도록 연결을 놓아준다", async () => {
+    let closed = false;
+    const store: Any = {
+      openCursor: () => {
+        const r: Any = { onsuccess: null, onerror: null, result: null };
+        queueMicrotask(() => r.onsuccess && r.onsuccess());
+        return r;
+      },
+    };
+    const db: Any = {
+      objectStoreNames: { contains: () => true },
+      onversionchange: null,
+      close: () => { closed = true; },
+      transaction: () => ({ objectStore: () => store, oncomplete: null,
+                            onerror: null }),
+    };
+    const idb: Any = {
+      open() {
+        const req: Any = { result: db, onerror: null, onsuccess: null,
+          onblocked: null, onupgradeneeded: null };
+        queueMicrotask(() => req.onsuccess && req.onsuccess());
+        return req;
+      },
+    };
+    vi.stubGlobal("indexedDB", idb);
+    const m = await import("./cache.ts");
+    await m.listArtworks();
+    expect(typeof db.onversionchange).toBe("function"); // 핸들러가 걸려 있어야
+    db.onversionchange();
+    expect(closed).toBe(true);
+  });
 });

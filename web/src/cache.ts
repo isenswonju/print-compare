@@ -42,9 +42,16 @@ export interface Section {
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
+// DB 버전이 올라갈 때(스토어 추가) IndexedDB는 **다른 탭이 옛 버전으로 열어둔
+// 연결이 전부 닫힐 때까지** 업그레이드를 시작하지 않는다. 이때 onblocked를
+// 처리하지 않으면 open이 성공도 실패도 하지 않고 영원히 매달리고, 보관함
+// 전체가 조용히 멈춘다(실제로 v3→v4에서 겪었다). 그래서
+//  · onblocked   — 무한 대기 대신 무엇을 해야 하는지 알려주는 오류로 바꾼다.
+//  · onversionchange — 다른 탭이 더 새 버전을 원하면 내 연결을 놓아준다.
+//    (이게 있으면 앞으로의 버전 업은 이 상황 자체가 생기지 않는다)
 function openDB(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise((res, rej) => {
+  const p = new Promise<IDBDatabase>((res, rej) => {
     const req = indexedDB.open(DB_NAME, DB_VER);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -59,10 +66,20 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains("tombstones"))
         db.createObjectStore("tombstones");
     };
-    req.onsuccess = () => res(req.result);
+    req.onblocked = () => rej(new Error(
+      "이 앱이 열려 있는 다른 탭·창 때문에 보관함을 열지 못했습니다 — " +
+      "다른 탭을 모두 닫고 새로고침해주세요."));
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => { db.close(); dbPromise = null; };
+      res(db);
+    };
     req.onerror = () => rej(req.error);
   });
-  return dbPromise;
+  // 실패를 캐시하면 새로고침 전까지 영구 실패한다 — 다음 호출이 다시 시도하게.
+  p.catch(() => { if (dbPromise === p) dbPromise = null; });
+  dbPromise = p;
+  return p;
 }
 
 function tx<T>(store: string, mode: IDBTransactionMode,

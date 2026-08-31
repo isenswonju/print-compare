@@ -92,8 +92,13 @@ a { color: var(--red); }
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
   margin-bottom: 8px;
 }
+.pairhead b { flex: 1; min-width: 0; }
+/* 다중 샘플 토글 — 세트 머리글의 작은 옵션 */
+.multi-opt { font-size: 0.78rem; color: #555; white-space: nowrap;
+  cursor: pointer; user-select: none; }
 .pairzones {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -581,14 +586,20 @@ details summary { cursor: pointer; }
   font-size: 0.74rem; padding: 2px 8px; cursor: pointer; color: var(--muted);
 }
 .sec-add:hover { border-color: var(--red); color: var(--red); }
-/* 보관함 백업/복원 도구 */
-.lib-tools { display: flex; gap: 6px; margin-bottom: 8px; }
+/* 공용 보관함 연결/동기화 도구 */
+.lib-tools { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; }
 .lib-tools button {
   flex: 1; border: 1px solid var(--line); background: #fff; color: #555;
   border-radius: 6px; padding: 4px 6px; font-size: 0.74rem; cursor: pointer;
 }
 .lib-tools button:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
 .lib-tools button:disabled { opacity: 0.4; cursor: default; }
+/* 연결 상태 표기 — 버튼과 같은 높이의 잔잔한 라벨 */
+.lib-sync-state { flex: 2; min-width: 0; font-size: 0.72rem; color: var(--muted);
+  padding: 4px 2px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+/* 서버에만 있는 원본(로컬 캐시 없음) 표시 */
+.art-cloud { flex: none; color: #9db3d6; font-size: 0.78rem; }
 .lib-status { font-size: 0.74rem; color: var(--muted); margin: 0 0 8px;
   padding: 4px 6px; background: #f6f7f9; border-radius: 6px; }
 /* 백업/복원 버튼 호버 설명 — 0높이 앵커 안에서 절대 위치로 띄워 레이아웃

@@ -2,12 +2,15 @@
 //  * refWords: 아트웍(REF) 파일 해시 → OCR 단어 목록. 같은 아트웍 재검수 시
 //    REF OCR(~90초)을 통째로 건너뛴다. 아트웍이 개정되면 해시가 달라져
 //    자동으로 새로 계산된다.
-//  * artworks: 검수했던 아트웍 원본 파일. "최근 아트웍" 원클릭 재사용.
-//    LRU 50개 초과분은 자동 삭제.
+//  * artworks: 공용 보관함의 로컬 사본. 서버가 원본이고 로컬은 캐시다 —
+//    목록(메타데이터)은 전부 두되, 파일 본체(blob)는 서버에서 필요할 때
+//    내려받고 저장 공간이 부족해지면 오래 안 쓴 것부터 비운다(pruneBlobCache).
+//  * tombstones: 삭제 기록. 공용 보관함에서 "지웠다"는 사실도 기기 간에
+//    전파돼야 해서, 삭제 시각을 남겨 매니페스트에 실어 보낸다.
 import type { PipelineResult, SetFb, Word } from "./types.ts";
 
 const DB_NAME = "artwork-compare-cache";
-const DB_VER = 3;
+const DB_VER = 4;
 // 결과 세션 보존 정책 (일반적인 웹 도구 관례): 최근 1세션만, 7일 후 만료.
 // 브라우저 안에만 저장되며 서버로 가지 않는다.
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -20,9 +23,13 @@ export interface ArtworkEntry {
   name: string;
   size: number;
   type: string;
-  blob: Blob;
+  // 파일 본체. 서버에서 목록만 받아온 항목은 blob 없이 url만 갖고 있다가
+  // 실제로 쓸 때(검수 투입 등) 내려받아 채운다.
+  blob?: Blob;
+  url?: string;      // 서버 blob URL(내용 주소) — 필요 시 내려받기용
   lastUsed: number;
-  section?: string; // 소속 섹션 id(없으면 미분류)
+  section?: string;  // 소속 섹션 id(없으면 미분류)
+  updatedAt?: number; // 마지막 변경 시각 — 삭제 기록(tombstone)과 승부용
 }
 
 export interface Section {
@@ -30,6 +37,7 @@ export interface Section {
   name: string;
   createdAt: number;
   parentId?: string; // 상위 섹션 id(없으면 최상위). 중첩 폴더 지원.
+  updatedAt?: number; // 마지막 변경 시각 — 삭제 기록과 승부용
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -48,6 +56,8 @@ function openDB(): Promise<IDBDatabase> {
         db.createObjectStore("session");
       if (!db.objectStoreNames.contains("sections"))
         db.createObjectStore("sections");
+      if (!db.objectStoreNames.contains("tombstones"))
+        db.createObjectStore("tombstones");
     };
     req.onsuccess = () => res(req.result);
     req.onerror = () => rej(req.error);
@@ -101,9 +111,62 @@ export const putRefWords = (hash: string, words: Word[]) =>
     s.put({ words, ts: Date.now() }, `${hash}|${OCR_CACHE_VER}`))
     .catch(() => {});
 
-// 아트웍은 영구 보관(자동 삭제 없음) — 사용자가 명시적으로 삭제할 때만 지워진다.
+// -------------------------------------------------- 삭제 기록(tombstone)
+// 공용 보관함은 "없다"와 "지웠다"를 구분해야 한다 — 그냥 지우기만 하면 다음
+// 동기화에서 서버 매니페스트가 도로 살려낸다. 삭제 시각을 남겨 매니페스트에
+// 실어 보내고, 병합 때 삭제 이후에 다시 추가된 항목만 살아남는다.
+export type Tombstones = {
+  artworks: Record<string, number>;  // hash → 삭제 시각(epoch ms)
+  sections: Record<string, number>;  // id → 삭제 시각
+};
+
+export async function listTombstones(): Promise<Tombstones> {
+  const out: Tombstones = { artworks: {}, sections: {} };
+  try {
+    const db = await openDB();
+    await new Promise<void>((res, rej) => {
+      const cur = db.transaction("tombstones", "readonly")
+        .objectStore("tombstones").openCursor();
+      cur.onsuccess = () => {
+        const c = cur.result;
+        if (!c) return res();
+        const key = String(c.key);
+        const at = (c.value as { at: number }).at;
+        if (key.startsWith("a:")) out.artworks[key.slice(2)] = at;
+        else if (key.startsWith("s:")) out.sections[key.slice(2)] = at;
+        c.continue();
+      };
+      cur.onerror = () => rej(cur.error);
+    });
+  } catch { /* 무시 */ }
+  return out;
+}
+
+const putTombstone = (key: string) =>
+  tx("tombstones", "readwrite", (s) => s.put({ at: Date.now() }, key))
+    .catch(() => {});
+const dropTombstone = (key: string) =>
+  tx("tombstones", "readwrite", (s) => s.delete(key)).catch(() => {});
+
+// 동기화 반영 후 필요 없어진 기록 정리(병합 결과에 반영된 것만 남긴다).
+export async function replaceTombstones(t: Tombstones): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((res, rej) => {
+      const trans = db.transaction("tombstones", "readwrite");
+      const s = trans.objectStore("tombstones");
+      s.clear();
+      for (const [h, at] of Object.entries(t.artworks)) s.put({ at }, "a:" + h);
+      for (const [id, at] of Object.entries(t.sections)) s.put({ at }, "s:" + id);
+      trans.oncomplete = () => res();
+      trans.onerror = () => rej(trans.error);
+    });
+  } catch { /* 무시 */ }
+}
+
 // 재저장 시 기존 폴더 배정은 유지한다(section 인자는 신규 저장일 때만 쓰인다 —
 // 보관함으로 직접 드롭한 파일을 그 폴더에 바로 넣기 위한 것).
+// 다시 추가하면 삭제 기록을 지워 동기화에서 되살아나게 한다.
 export async function saveArtwork(
   hash: string, file: File, section?: string): Promise<void> {
   try {
@@ -111,14 +174,17 @@ export async function saveArtwork(
       "artworks", "readonly", (s) => s.get(hash));
     await tx("artworks", "readwrite", (s) =>
       s.put({ name: file.name, size: file.size, type: file.type,
-              blob: file, lastUsed: Date.now(),
+              blob: file, lastUsed: Date.now(), updatedAt: Date.now(),
+              url: existing?.url,
               section: existing ? existing.section : section }, hash));
+    await dropTombstone("a:" + hash);
   } catch { /* 캐시 실패는 기능에 영향 없음 */ }
 }
 
 export async function deleteArtwork(hash: string): Promise<void> {
   try {
     await tx("artworks", "readwrite", (s) => s.delete(hash));
+    await putTombstone("a:" + hash);
   } catch { /* 무시 */ }
 }
 
@@ -128,7 +194,8 @@ export async function setArtworkSection(
     const rec = await tx<Omit<ArtworkEntry, "hash">>(
       "artworks", "readonly", (s) => s.get(hash));
     if (!rec) return;
-    await tx("artworks", "readwrite", (s) => s.put({ ...rec, section }, hash));
+    await tx("artworks", "readwrite", (s) =>
+      s.put({ ...rec, section, updatedAt: Date.now() }, hash));
   } catch { /* 무시 */ }
 }
 
@@ -180,7 +247,7 @@ export async function createSection(
   try {
     const sec: Section = {
       id: `sec-${Date.now().toString(36)}-${++sectionSeq}`,
-      name, createdAt: Date.now(), parentId,
+      name, createdAt: Date.now(), parentId, updatedAt: Date.now(),
     };
     await tx("sections", "readwrite", (s) => s.put(sec, sec.id));
     return sec;
@@ -191,7 +258,8 @@ export async function renameSection(id: string, name: string): Promise<void> {
   try {
     const rec = await tx<Section>("sections", "readonly", (s) => s.get(id));
     if (!rec) return;
-    await tx("sections", "readwrite", (s) => s.put({ ...rec, name }, id));
+    await tx("sections", "readwrite", (s) =>
+      s.put({ ...rec, name, updatedAt: Date.now() }, id));
   } catch { /* 무시 */ }
 }
 
@@ -214,25 +282,37 @@ export async function moveSection(
     }
     if (target.parentId === parentId) return false; // 제자리
     await tx("sections", "readwrite", (s) =>
-      s.put({ ...target, parentId }, id));
+      s.put({ ...target, parentId, updatedAt: Date.now() }, id));
     return true;
   } catch { return false; }
 }
 
 // 섹션을 지우면 그 안의 아트웍은 삭제하지 않고 미분류로 되돌리고,
 // 하위 섹션은 지워지는 섹션의 부모(없으면 최상위)로 끌어올린다.
-export async function deleteSection(id: string): Promise<void> {
+// tombstone: 사용자가 직접 지울 때만 남긴다 — 동기화가 서버의 삭제를 반영할
+// 때(remote=true)는 새 기록을 만들면 안 된다(원래 삭제 시각이 매니페스트에 있다).
+export async function deleteSection(
+  id: string, opts?: { remote?: boolean }): Promise<void> {
   try {
     const target = await tx<Section>("sections", "readonly", (s) => s.get(id));
     const parentId = target?.parentId;
     await tx("sections", "readwrite", (s) => s.delete(id));
+    if (!opts?.remote) await putTombstone("s:" + id);
     const secs = await listSections();
     await Promise.all(secs.filter((s) => s.parentId === id).map((s) =>
-      tx("sections", "readwrite", (st) => st.put({ ...s, parentId }, s.id))));
+      tx("sections", "readwrite", (st) =>
+        st.put({ ...s, parentId, updatedAt: Date.now() }, s.id))));
     const arts = await listArtworks();
     await Promise.all(arts.filter((a) => a.section === id)
       .map((a) => setArtworkSection(a.hash, undefined)));
   } catch { /* 무시 */ }
+}
+
+// 동기화가 서버의 삭제를 로컬에 반영할 때 쓰는 원시 삭제 — tombstone을 새로
+// 남기지 않는다(putTombstone하면 삭제 이후의 재추가가 또 죽는다).
+export async function removeArtworkRaw(hash: string): Promise<void> {
+  try { await tx("artworks", "readwrite", (s) => s.delete(hash)); }
+  catch { /* 무시 */ }
 }
 
 // ---------------------------------------------------------------- 결과 세션
@@ -243,6 +323,8 @@ export interface StoredSet {
   setId?: number;
   page?: number;
   pageCount?: number;
+  instance?: number;      // 다중 샘플 모드 — 몇 번째 샘플인지
+  instanceCount?: number;
   error?: string;
   result?: PipelineResult;
   fb?: SetFb;
@@ -309,15 +391,53 @@ export async function storageEstimate(): Promise<
   } catch { return null; }
 }
 
+// 아트웍 파일을 가져온다. 로컬에 본체(blob)가 없고 서버 URL만 있으면(공용
+// 보관함에서 목록만 받아온 항목) 그 자리에서 내려받아 캐시에 채운 뒤 돌려준다.
 export async function getArtworkFile(hash: string): Promise<File | null> {
   try {
     const rec = await tx<Omit<ArtworkEntry, "hash">>(
       "artworks", "readonly", (s) => s.get(hash));
     if (!rec) return null;
+    let blob = rec.blob;
+    if (!blob && rec.url) {
+      const res = await fetch(rec.url);
+      if (!res.ok) throw new Error(`다운로드 실패(${res.status})`);
+      blob = await res.blob();
+      pruneBlobCache().catch(() => {});
+    }
+    if (!blob) return null;
     tx("artworks", "readwrite", (s) =>
-      s.put({ ...rec, lastUsed: Date.now() }, hash)).catch(() => {});
-    return new File([rec.blob], rec.name, { type: rec.type });
+      s.put({ ...rec, blob, lastUsed: Date.now() }, hash)).catch(() => {});
+    return new File([blob], rec.name, { type: rec.type });
   } catch { return null; }
+}
+
+// ------------------------------------------------ 로컬 blob 캐시 정리(LRU)
+// 서버가 원본을 갖고 있는 항목(url 있음)은 로컬 blob을 비워도 잃는 게 없다.
+// 저장 공간이 한도의 60%를 넘으면 오래 안 쓴 것부터 blob만 비워(목록·메타는
+// 유지) 50% 아래로 내린다 — 보관함이 200장을 넘어도 로컬 할당량에 안 걸린다.
+const PRUNE_START = 0.6, PRUNE_STOP = 0.5;
+
+export async function pruneBlobCache(): Promise<number> {
+  try {
+    const est = await storageEstimate();
+    if (!est?.quota || est.usage / est.quota < PRUNE_START) return 0;
+    let usage = est.usage;
+    const target = est.quota * PRUNE_STOP;
+    const candidates = (await listArtworks())
+      .filter((a) => a.blob && a.url)
+      .sort((a, b) => a.lastUsed - b.lastUsed);
+    let n = 0;
+    for (const a of candidates) {
+      if (usage <= target) break;
+      const { blob, ...rest } = a;
+      const { hash, ...noHash } = rest;
+      await tx("artworks", "readwrite", (s) => s.put(noHash, hash));
+      usage -= blob!.size;
+      n++;
+    }
+    return n;
+  } catch { return 0; }
 }
 
 // -------------------------------------------------- 보관함 동기화(매니페스트)
@@ -327,7 +447,9 @@ export async function getArtworkFile(hash: string): Promise<File | null> {
 //  · 이미 서버에 있는 해시는 건너뛰어(내용 주소 지정) 증분 동기화가 되고
 //  · 중간에 끊겨도 다음 시도가 이어서 진행되며
 //  · 메모리 사용이 "가장 큰 파일 1개" 수준으로 고정된다.
-export const LIBRARY_MANIFEST_VERSION = 2;
+// v3: 삭제 기록(deleted)을 실어 "지웠다"가 기기 간에 전파되게 했다. v2 이하
+// 매니페스트(deleted 없음)도 그대로 읽힌다 — 빈 기록으로 간주.
+export const LIBRARY_MANIFEST_VERSION = 3;
 
 export interface ArtworkMeta {
   hash: string;
@@ -335,6 +457,7 @@ export interface ArtworkMeta {
   size: number;
   type: string;
   section?: string;
+  updatedAt?: number; // 삭제 기록과 승부 — 삭제 이후 재추가만 살아남는다
 }
 
 export interface LibraryManifest {
@@ -342,31 +465,100 @@ export interface LibraryManifest {
   exportedAt: number;
   sections: Section[];
   artworks: ArtworkMeta[]; // 파일 본체는 별도 blob(library/f/<hash>)
+  deleted?: Tombstones;    // v3 — 삭제 전파용
 }
 
 // 보관함 메타데이터만 모아 매니페스트로. 파일 본체는 읽지 않는다(가볍다).
 export async function exportManifest(): Promise<LibraryManifest> {
-  const [arts, secs] = await Promise.all([listArtworks(), listSections()]);
+  const [arts, secs, dead] = await Promise.all(
+    [listArtworks(), listSections(), listTombstones()]);
   return {
     version: LIBRARY_MANIFEST_VERSION,
     exportedAt: Date.now(),
     sections: secs,
     artworks: arts.map((a) => ({ hash: a.hash, name: a.name, size: a.size,
-                                 type: a.type, section: a.section })),
+                                 type: a.type, section: a.section,
+                                 updatedAt: a.updatedAt })),
+    deleted: dead,
   };
 }
 
-// 두 매니페스트를 합친다(공용 보관함이라 남의 항목을 지우면 안 된다).
-// 같은 키는 primary가 이긴다 — 올리는 쪽의 최신 상태를 반영.
+// 두 매니페스트를 합친다 — 공용 보관함의 병합 규칙:
+//  · 항목은 합집합, 같은 키는 primary(올리는 쪽) 승.
+//  · 삭제 기록도 합집합(더 늦은 시각 승). 삭제 시각보다 나중에 갱신된 항목은
+//    "삭제 후 재추가"이므로 살리고 그 삭제 기록은 버린다.
 export function mergeManifests(
   primary: LibraryManifest, other: LibraryManifest | null): LibraryManifest {
-  if (!other) return primary;
-  const secs = new Map((other.sections ?? []).map((s) => [s.id, s]));
+  const unionDead = (a: Record<string, number> = {},
+                     b: Record<string, number> = {}) => {
+    const out = { ...a };
+    for (const [k, at] of Object.entries(b)) out[k] = Math.max(out[k] ?? 0, at);
+    return out;
+  };
+  const deadArts = unionDead(primary.deleted?.artworks,
+                             other?.deleted?.artworks);
+  const deadSecs = unionDead(primary.deleted?.sections,
+                             other?.deleted?.sections);
+
+  const secs = new Map((other?.sections ?? []).map((s) => [s.id, s]));
   for (const s of primary.sections) secs.set(s.id, s);
-  const arts = new Map((other.artworks ?? []).map((a) => [a.hash, a]));
+  const arts = new Map((other?.artworks ?? []).map((a) => [a.hash, a]));
   for (const a of primary.artworks) arts.set(a.hash, a);
+
+  for (const [hash, at] of Object.entries(deadArts)) {
+    const a = arts.get(hash);
+    if (!a) continue;
+    if ((a.updatedAt ?? 0) > at) delete deadArts[hash]; // 재추가가 이겼다
+    else arts.delete(hash);
+  }
+  for (const [id, at] of Object.entries(deadSecs)) {
+    const s = secs.get(id);
+    if (!s) continue;
+    if ((s.updatedAt ?? s.createdAt ?? 0) > at) delete deadSecs[id];
+    else secs.delete(id);
+  }
+
   return { version: LIBRARY_MANIFEST_VERSION, exportedAt: primary.exportedAt,
-           sections: [...secs.values()], artworks: [...arts.values()] };
+           sections: [...secs.values()], artworks: [...arts.values()],
+           deleted: { artworks: deadArts, sections: deadSecs } };
+}
+
+// 병합된 매니페스트를 로컬 보관함에 반영한다(동기화의 "내려받기 없이 목록만"
+// 단계). 파일 본체는 내려받지 않고 서버 URL만 적어 둔다 — 실제 사용 시점에
+// getArtworkFile이 내려받는다. 병합에서 사라진(=삭제 전파된) 로컬 항목은 지운다.
+export async function applyManifestToLocal(
+  merged: LibraryManifest, serverUrls: Map<string, string>): Promise<void> {
+  await putSections(merged.sections ?? []);
+  const keepSecs = new Set((merged.sections ?? []).map((s) => s.id));
+  for (const s of await listSections())
+    if (!keepSecs.has(s.id)) await deleteSection(s.id, { remote: true });
+
+  const keepArts = new Set((merged.artworks ?? []).map((a) => a.hash));
+  const local = new Map((await listArtworks()).map((a) => [a.hash, a]));
+  for (const hash of local.keys())
+    if (!keepArts.has(hash)) await removeArtworkRaw(hash);
+
+  for (const a of merged.artworks ?? []) {
+    const cur = local.get(a.hash);
+    const url = serverUrls.get(a.hash) ?? cur?.url;
+    if (cur) {
+      // 메타데이터(이름·폴더·URL)만 맞춘다 — blob은 그대로 둔다.
+      if (cur.name === a.name && cur.section === a.section && cur.url === url &&
+          cur.updatedAt === a.updatedAt) continue;
+      const { hash, ...rest } = cur;
+      await tx("artworks", "readwrite", (s) =>
+        s.put({ ...rest, name: a.name, section: a.section, url,
+                updatedAt: a.updatedAt }, hash));
+    } else {
+      // 새 항목 — 목록에만 추가(blob 없음). 서버에 본체가 없으면(예외 상황)
+      // 내려받을 길이 없으므로 목록에도 넣지 않는다.
+      if (!url) continue;
+      await tx("artworks", "readwrite", (s) =>
+        s.put({ name: a.name, size: a.size, type: a.type, url,
+                lastUsed: 0, section: a.section, updatedAt: a.updatedAt },
+              a.hash));
+    }
+  }
 }
 
 // 보관함에 이미 있는 해시 집합 — 올릴/받을 목록을 추리는 데 쓴다(본체 미로드).

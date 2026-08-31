@@ -84,6 +84,10 @@ export interface ResultItem {
   setId: number;        // 같은 세트의 페이지들을 묶는 id
   page: number;         // 세트 내 페이지 번호(1-based)
   pageCount: number;    // 세트의 총 페이지 수
+  // 다중 샘플 모드 — 인쇄물 한 장에서 잘라낸 몇 번째 샘플인지(1-based).
+  // 일반 모드에서는 없음.
+  instance?: number;
+  instanceCount?: number;
   error?: string;
   result?: PipelineResult;
   defects?: DispFinding[];

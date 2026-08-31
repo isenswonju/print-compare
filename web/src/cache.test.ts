@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  LIBRARY_MANIFEST_VERSION, clearSession, createSection, deleteArtwork,
-  deleteSection, exportManifest, getArtworkBlob, getArtworkFile, getRefWords,
-  hashFile, importLibrary, listArtworkHashes, listArtworks, listSections,
-  loadSession, mergeManifests, moveSection, putRefWords, putSections,
-  renameSection, requestPersistentStorage, saveArtwork, saveArtworkBlob,
+  LIBRARY_MANIFEST_VERSION, applyManifestToLocal, clearSession, createSection,
+  deleteArtwork, deleteSection, exportManifest, getArtworkBlob, getArtworkFile,
+  getRefWords, hashFile, importLibrary, listArtworkHashes, listArtworks,
+  listSections, listTombstones, loadSession, mergeManifests, moveSection,
+  putRefWords, putSections, renameSection, replaceTombstones,
+  requestPersistentStorage, saveArtwork, saveArtworkBlob,
   saveSession, setArtworkSection, storageEstimate,
   type LibraryManifest, type StoredSet,
 } from "./cache.ts";
@@ -219,7 +220,7 @@ describe("서버 동기화용 매니페스트(v2)", () => {
     expect(e.section).toBe(sec!.id);
     // 본체(blob/base64)는 매니페스트에 들어가지 않는다 — 이게 v1과의 차이
     expect(Object.keys(e).sort())
-      .toEqual(["hash", "name", "section", "size", "type"]);
+      .toEqual(["hash", "name", "section", "size", "type", "updatedAt"]);
     expect(m.sections.some((s) => s.id === sec!.id)).toBe(true);
   });
 
@@ -275,12 +276,94 @@ describe("서버 동기화용 매니페스트(v2)", () => {
     expect(m.sections.find((s) => s.id === "s1")!.name).toBe("내폴더"); // 내 것이 이김
     expect(m.artworks.map((a) => a.hash).sort()).toEqual(["a1", "a2"]);
     expect(m.artworks.find((a) => a.hash === "a1")!.name).toBe("내파일.png");
-    expect(mergeManifests(mine, null)).toBe(mine); // 서버가 비어 있으면 그대로
+    // 서버가 비어 있으면 내 항목이 그대로 살아남는다(v3 형식으로 정규화됨)
+    const alone = mergeManifests(mine, null);
+    expect(alone.version).toBe(LIBRARY_MANIFEST_VERSION);
+    expect(alone.artworks).toEqual(mine.artworks);
+    expect(alone.sections).toEqual(mine.sections);
     // 서버 매니페스트에 필드가 빠져 있어도(옛 형식) 내 것만으로 성립해야 한다
     const partial = mergeManifests(mine, { version: 2, exportedAt: 1 } as
       unknown as LibraryManifest);
     expect(partial.sections.map((s) => s.id)).toEqual(["s1"]);
     expect(partial.artworks.map((a) => a.hash)).toEqual(["a1"]);
+  });
+
+  it("mergeManifests: 삭제 기록(tombstone)이 전파되고, 이후 재추가는 살아남는다", () => {
+    const base = { version: 3, exportedAt: 10 };
+    // 내가 a1을 시각 100에 지웠다 — 서버(다른 기기)에는 아직 a1이 있다.
+    const mine: LibraryManifest = {
+      ...base, sections: [], artworks: [],
+      deleted: { artworks: { a1: 100 }, sections: { s1: 100 } },
+    };
+    const theirs: LibraryManifest = {
+      ...base,
+      sections: [{ id: "s1", name: "폴더", createdAt: 1, updatedAt: 50 }],
+      artworks: [{ hash: "a1", name: "f.png", size: 1, type: "image/png",
+                   updatedAt: 50 }],
+    };
+    const m = mergeManifests(mine, theirs);
+    expect(m.artworks).toEqual([]);          // 삭제가 이김(50 < 100)
+    expect(m.sections).toEqual([]);
+    expect(m.deleted!.artworks.a1).toBe(100); // 기록은 남아 계속 전파된다
+
+    // 삭제(100) 이후에 다시 추가(updatedAt 200)된 항목은 살아남고 기록은 소멸
+    const readd: LibraryManifest = {
+      ...base, sections: [],
+      artworks: [{ hash: "a1", name: "f.png", size: 1, type: "image/png",
+                   updatedAt: 200 }],
+    };
+    const m2 = mergeManifests(readd, m);
+    expect(m2.artworks.map((a) => a.hash)).toEqual(["a1"]);
+    expect(m2.deleted!.artworks.a1).toBeUndefined();
+  });
+
+  it("deleteArtwork/deleteSection은 삭제 기록을 남기고, saveArtwork가 지운다", async () => {
+    await saveArtwork("tb1", file("t.png", "T"));
+    await deleteArtwork("tb1");
+    const sec = await createSection("지울폴더");
+    await deleteSection(sec!.id);
+    let dead = await listTombstones();
+    expect(dead.artworks.tb1).toBeTypeOf("number");
+    expect(dead.sections[sec!.id]).toBeTypeOf("number");
+    // 동기화가 서버의 삭제를 반영하는 경로는 기록을 새로 만들지 않는다
+    const sec2 = await createSection("원격삭제");
+    await deleteSection(sec2!.id, { remote: true });
+    dead = await listTombstones();
+    expect(dead.sections[sec2!.id]).toBeUndefined();
+    // 재추가하면 아트웍 기록이 사라진다(부활 가능)
+    await saveArtwork("tb1", file("t.png", "T"));
+    dead = await listTombstones();
+    expect(dead.artworks.tb1).toBeUndefined();
+    await deleteArtwork("tb1");
+    await replaceTombstones({ artworks: {}, sections: {} }); // 정리
+  });
+
+  it("applyManifestToLocal: 목록만 반영(blob 없음·url 보존)하고, 빠진 항목은 지운다", async () => {
+    await saveArtwork("keep1", file("유지.png", "K"));
+    await saveArtwork("gone1", file("삭제됨.png", "G"));
+    const merged: LibraryManifest = {
+      version: 3, exportedAt: 1,
+      sections: [{ id: "am-s", name: "서버폴더", createdAt: 1 }],
+      artworks: [
+        { hash: "keep1", name: "유지.png", size: 1, type: "image/png",
+          section: "am-s" },
+        { hash: "srv1", name: "서버에만.png", size: 9, type: "image/png" },
+      ],
+      deleted: { artworks: {}, sections: {} },
+    };
+    await applyManifestToLocal(merged, new Map([["srv1", "https://x/srv1"]]));
+    const arts = await listArtworks();
+    expect(arts.some((a) => a.hash === "gone1")).toBe(false); // 삭제 전파
+    const keep = arts.find((a) => a.hash === "keep1")!;
+    expect(keep.blob).toBeTruthy();          // 로컬 본체는 유지
+    expect(keep.section).toBe("am-s");       // 메타는 서버 병합 결과로
+    const srv = arts.find((a) => a.hash === "srv1")!;
+    expect(srv.blob).toBeUndefined();        // 목록만 — 본체는 내려받지 않음
+    expect(srv.url).toBe("https://x/srv1");
+    // 정리
+    await deleteArtwork("keep1"); await deleteArtwork("srv1");
+    await deleteSection("am-s");
+    await replaceTombstones({ artworks: {}, sections: {} });
   });
 });
 
@@ -333,7 +416,7 @@ describe("hashFile", () => {
 // 세션 스토어에 원시 레코드를 직접 넣는 헬퍼(레거시 포맷 재현용).
 function rawPutSession(value: unknown): Promise<void> {
   return new Promise((res, rej) => {
-    const req = indexedDB.open("artwork-compare-cache", 3);
+    const req = indexedDB.open("artwork-compare-cache", 4);
     req.onsuccess = () => {
       const db = req.result;
       const t = db.transaction("session", "readwrite");

@@ -4,6 +4,7 @@
 // 사용 불가 — Node 하니스에서만 쓴다.
 // OCR(tesseract.js)은 메인 스레드가 자체 워커로 병렬 실행 후 'ocr' 메시지로 회신.
 import { runPipeline } from "./engine.ts";
+import { detectInstances } from "./multisample.ts";
 import type { CV, OcrWords } from "../types.ts";
 
 declare function importScripts(...urls: string[]): void;
@@ -92,6 +93,22 @@ ctx.onmessage = async (e: MessageEvent) => {
         },
       );
       ctx.postMessage({ type: "done", result });
+    } catch (err) {
+      ctx.postMessage({ type: "error", msg: describeError(err),
+                        stage: lastStage });
+    }
+  } else if (msg.type === "detect") {
+    // 다중 샘플 검출 — TEST 스캔 한 장에서 REF가 나타나는 위치들을 찾는다.
+    lastStage = "다중 샘플 검출";
+    try {
+      const { cv } = await cvReady;
+      const rects = detectInstances(
+        cv,
+        { data: new Uint8ClampedArray(msg.ref.buf), width: msg.ref.w, height: msg.ref.h },
+        { data: new Uint8ClampedArray(msg.test.buf), width: msg.test.w, height: msg.test.h },
+        (m) => ctx.postMessage({ type: "log", msg: m }),
+      );
+      ctx.postMessage({ type: "detected", rects });
     } catch (err) {
       ctx.postMessage({ type: "error", msg: describeError(err),
                         stage: lastStage });

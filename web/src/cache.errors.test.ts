@@ -208,7 +208,8 @@ describe("cache — IndexedDB 실패 방어", () => {
 
   it("onupgradeneeded: 이미 있는 스토어는 다시 만들지 않는다(멱등)", async () => {
     // 스토어가 모두 존재하는 DB로 업그레이드 → 모든 !contains 분기의 '건너뜀' 쪽.
-    const existing = new Set(["refWords", "artworks", "session", "sections"]);
+    const existing = new Set(
+      ["refWords", "artworks", "session", "sections", "tombstones"]);
     const created: string[] = [];
     const db: Any = {
       objectStoreNames: { contains: (n: string) => existing.has(n) },

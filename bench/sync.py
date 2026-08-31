@@ -21,7 +21,6 @@
 """
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from datetime import datetime
@@ -30,7 +29,6 @@ from pathlib import Path
 from .cases import CASE_DIR, ROOT
 
 LOG = ROOT / "bench" / "out" / "sync.log"
-PW_FILE = ROOT / "private" / ".library-password"
 STAMP = ROOT / "bench" / "out" / ".last-sync-date"   # 완주한 날짜(YYYY-MM-DD)
 MAX_LOG_LINES = 4000
 
@@ -232,23 +230,18 @@ def main(argv=None) -> int:
     net_ok = check_deploy()
     check_feedback_health(net_ok)
 
-    # 1) 보관함에서 새 아트웍
-    if PW_FILE.exists():
-        before = case_files()
-        os.environ.setdefault("ADMIN_PASSWORD",
-                              PW_FILE.read_text(encoding="utf-8").strip())
-        try:
-            from . import import_library
-            import_library.main(["--server", "--limit", "50"])
-        except SystemExit:
-            pass
-        except Exception as e:
-            log(f"보관함 수입 실패: {e}")
-        new_cases = sorted(case_files() - before)
-        if new_cases:
-            log(f"새 아트웍 케이스 파일 {len(new_cases)}건: {', '.join(new_cases)}")
-    else:
-        log(f"보관함 비밀번호 파일이 없어 수입은 건너뜀 ({PW_FILE})")
+    # 1) 공용 보관함에서 새 아트웍 (비밀번호 없음 — 항상 시도)
+    before = case_files()
+    try:
+        from . import import_library
+        import_library.main(["--server", "--limit", "50"])
+    except SystemExit:
+        pass
+    except Exception as e:
+        log(f"보관함 수입 실패: {e}")
+    new_cases = sorted(case_files() - before)
+    if new_cases:
+        log(f"새 아트웍 케이스 파일 {len(new_cases)}건: {', '.join(new_cases)}")
 
     # 2) 전 케이스 점검 — 이력·기준선은 건드리지 않는다
     from . import run as bench_run

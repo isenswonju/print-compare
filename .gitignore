@@ -20,9 +20,9 @@ feedback/*.jsonl
 feedback/images/*
 webjobs/
 
-# 보관함·피드백 게이트 비밀번호(ADMIN_PASSWORD)를 로컬에 둘 때 쓰는 파일.
-# 대화·저장소에 비번을 남기지 않고 `ADMIN_PASSWORD=$(cat private/.library-password)`
-# 형태로 쓰기 위한 것.
+# 피드백 관리자(ADMIN_PASSWORD)를 로컬에 둘 때 쓰는 파일. 대화·저장소에 비번을
+# 남기지 않기 위한 것. 공용 보관함은 2026-08-31부터 비번이 없어 이 파일을 쓰지
+# 않는다(관리자 조회 /api/admin 에만 해당).
 private/.library-password
 
 # 생성 산출물·비공개 케이스(실물 라벨 이미지)는 저장소에 넣지 않는다

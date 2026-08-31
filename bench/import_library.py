@@ -23,7 +23,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import sys
 import urllib.request
 from pathlib import Path
@@ -60,13 +59,13 @@ def _post(url: str, payload: dict) -> dict:
         return json.loads(r.read().decode())
 
 
-def from_server(url: str, password: str, limit: int) -> list[tuple[str, bytes]]:
+def from_server(url: str, limit: int) -> list[tuple[str, bytes]]:
     """공용 보관함의 파일 목록 → 내용 주소(해시)로 내려받는다.
 
     매니페스트에 파일명이 있으면 그걸 쓰고, 없으면 해시를 이름으로 쓴다.
-    (프로토콜은 web/src/server-library.ts 와 동일하다.)
+    (프로토콜은 web/src/server-library.ts 와 동일하다 — 비밀번호 없음.)
     """
-    listing = _post(url, {"action": "listfiles", "password": password})
+    listing = _post(url, {"action": "listfiles"})
     files = listing.get("files", [])
     names: dict[str, str] = {}
     if listing.get("manifestUrl"):
@@ -166,8 +165,6 @@ def main(argv=None) -> int:
     src.add_argument("--dir", type=Path, help="원본이 있는 로컬 폴더")
     src.add_argument("--server", action="store_true", help="공용 서버 보관함에서")
     ap.add_argument("--url", default=LIBRARY_URL)
-    ap.add_argument("--password", default=os.environ.get("ADMIN_PASSWORD"),
-                    help="보관함 비밀번호(기본: 환경변수 ADMIN_PASSWORD)")
     ap.add_argument("--limit", type=int, default=10, help="최대 원본 수(기본 10)")
     ap.add_argument("--recipes", default=",".join(DEFAULT_RECIPES),
                     help="benign 레시피(쉼표). 원본당 케이스 수가 늘어난다")
@@ -176,11 +173,8 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     if args.server:
-        if not args.password:
-            print("보관함 비밀번호가 필요하다: --password 또는 ADMIN_PASSWORD 환경변수")
-            return 2
         try:
-            items = from_server(args.url, args.password, args.limit)
+            items = from_server(args.url, args.limit)
         except Exception as e:
             print(f"보관함에 접근하지 못했다: {e}")
             return 2
@@ -191,8 +185,8 @@ def main(argv=None) -> int:
         items = from_dir(args.dir, args.limit)
 
     if not items:
-        print("가져올 원본이 없다. (서버 보관함이 비어 있으면 앱에서 ☁서버백업을 "
-              "한 번 눌러야 팀 공유가 시작된다)")
+        print("가져올 원본이 없다. (공용 보관함이 비어 있다 — 앱에서 원본을 "
+              "하나라도 넣으면 자동으로 서버에 올라간다)")
         return 0
 
     recipes = [r.strip() for r in args.recipes.split(",") if r.strip()]

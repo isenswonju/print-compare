@@ -28,7 +28,7 @@ describe("보관함 — 실 브라우저 바이너리 왕복", () => {
                           new Blob(["ABCDEF"], { type: "image/png" }));
     const restored = (await listArtworks()).find((a) => a.hash === "browserBk2")!;
     expect(restored).toBeTruthy();
-    expect(await restored.blob.text()).toBe("ABCDEF"); // 실 IndexedDB Blob 왕복
+    expect(await restored.blob!.text()).toBe("ABCDEF"); // 실 IndexedDB Blob 왕복
     expect(restored.section).toBe(sec!.id);
 
     await deleteArtwork("browserBk2");
@@ -49,7 +49,7 @@ describe("보관함 — 실 브라우저 바이너리 왕복", () => {
                    dataB64: btoa("OLDBYTES") }],
     });
     const restored = (await listArtworks()).find((a) => a.hash === "browserV1")!;
-    expect(await restored.blob.text()).toBe("OLDBYTES");
+    expect(await restored.blob!.text()).toBe("OLDBYTES");
     expect(restored.section).toBe(sec!.id);
 
     await deleteArtwork("browserV1");

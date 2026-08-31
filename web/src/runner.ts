@@ -8,11 +8,14 @@ import type { OcrWords, PipelineResult, ResultItem, Word } from "./types.ts";
 
 // 한 세트(품목) = 원본 페이지들 ↔ 인쇄물 페이지들(같은 장수). 세트는 페이지
 // 수만큼의 페이지쌍 분석으로 펼쳐진다.
+// multiSample: 인쇄물 스캔 한 장에 같은 샘플이 여러 개 — 원본 1장·인쇄물
+// 1장을 받아 샘플 위치를 검출한 뒤 샘플 수만큼의 분석으로 펼친다.
 export interface RunSet {
   setId: number;
   name: string;
   refPages: File[];
   testPages: File[];
+  multiSample?: boolean;
 }
 
 interface RunCallbacks {
@@ -97,6 +100,8 @@ export interface PageJob {
   pageCount: number;
   ref: File;
   test: File;
+  instance?: number;       // 다중 샘플 모드 — 몇 번째 샘플 크롭인지(1-based)
+  instanceCount?: number;
 }
 
 // 세트들을 페이지쌍 단위 작업으로 펼친다(원본 페이지 i ↔ 인쇄물 페이지 i).
@@ -112,16 +117,105 @@ export function expandSets(sets: RunSet[]): PageJob[] {
   return jobs;
 }
 
+// ------------------------------------------------------- 다중 샘플 세트 펼치기
+// 워커에서 샘플 위치를 검출한다(OpenCV가 워커에만 있다).
+function detectInWorker(refImg: ImageData, testImg: ImageData,
+                        log: (m: string) => void):
+  Promise<{ x: number; y: number; w: number; h: number }[]> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(
+      new URL("./pipeline/cv.worker.ts", import.meta.url));
+    const bye = () => worker.terminate();
+    worker.onmessage = (e) => {
+      const msg = e.data;
+      if (msg.type === "log") log(msg.msg);
+      else if (msg.type === "detected") { bye(); resolve(msg.rects); }
+      else if (msg.type === "error") { bye(); reject(new Error(msg.msg)); }
+    };
+    worker.onerror = (e) => { bye(); reject(new Error(e.message || "worker 오류")); };
+    const refBuf = refImg.data.buffer.slice(0);
+    const testBuf = testImg.data.buffer.slice(0);
+    worker.postMessage(
+      {
+        type: "detect",
+        ref: { buf: refBuf, w: refImg.width, h: refImg.height },
+        test: { buf: testBuf, w: testImg.width, h: testImg.height },
+      },
+      [refBuf, testBuf],
+    );
+  });
+}
+
+// 인쇄물에서 샘플 영역을 잘라 PNG 파일로 만든다 — 이후 파이프라인·피드백·
+// 세션 보존이 전부 "크롭 = 인쇄물 1장"으로 일관되게 흘러가게 한다.
+async function cropToFile(
+  src: HTMLCanvasElement,
+  r: { x: number; y: number; w: number; h: number },
+  name: string): Promise<File> {
+  const c = document.createElement("canvas");
+  c.width = r.w;
+  c.height = r.h;
+  c.getContext("2d")!.drawImage(src, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
+  const blob = await new Promise<Blob | null>((res) => c.toBlob(res, "image/png"));
+  if (!blob) throw new Error("샘플 크롭 이미지 생성 실패");
+  return new File([blob], name, { type: "image/png" });
+}
+
+// 다중 샘플 세트 1개 → 샘플별 페이지 잡. 검출 실패는 예외로 올린다(호출부가
+// 그 세트만 실패 결과로 처리).
+export async function expandMultiSet(
+  s: RunSet, log: (m: string) => void): Promise<PageJob[]> {
+  const ref = s.refPages[0], test = s.testPages[0];
+  const [refImg, testImg] = await Promise.all(
+    [fileToImageData(ref), fileToImageData(test)]);
+  const rects = await detectInWorker(refImg, testImg, (m) => log(`[${s.name}] ${m}`));
+  if (rects.length === 0)
+    throw new Error("인쇄물에서 원본과 닮은 샘플을 찾지 못했습니다 — " +
+      "원본·인쇄물이 맞는 짝인지, 해상도(스캔 dpi)가 비슷한지 확인해주세요.");
+  const testCanvas = imageDataToCanvas(testImg);
+  const base = test.name.replace(/\.[^.]+$/, "");
+  const jobs: PageJob[] = [];
+  for (let i = 0; i < rects.length; i++)
+    jobs.push({
+      setId: s.setId, name: s.name, page: 1, pageCount: 1,
+      instance: i + 1, instanceCount: rects.length,
+      ref,
+      test: await cropToFile(testCanvas, rects[i],
+                             `${base}-샘플${i + 1}.png`),
+    });
+  return jobs;
+}
+
 export async function runAll(
   sets: RunSet[],
   useOcr: boolean,
   cb: RunCallbacks,
 ): Promise<void> {
-  const jobs = expandSets(sets);
+  // 다중 샘플 세트는 먼저 샘플 위치를 검출해 샘플별 잡으로 펼친다. 검출에
+  // 실패한 세트는 그 세트만 실패 결과로 남기고 나머지는 계속 진행한다.
+  const jobs: (PageJob & { preError?: string })[] = [];
+  for (const s of sets) {
+    if (!s.multiSample) {
+      jobs.push(...expandSets([s]));
+      continue;
+    }
+    try {
+      cb.stage(0, `[${s.name}] 샘플 위치 검출 중`);
+      const expanded = await expandMultiSet(s, cb.log);
+      cb.log(`[${s.name}] 다중 샘플 모드 — 샘플 ${expanded.length}개로 분석`);
+      jobs.push(...expanded);
+    } catch (err) {
+      jobs.push({ setId: s.setId, name: s.name, page: 1, pageCount: 1,
+                  ref: s.refPages[0], test: s.testPages[0],
+                  preError: String((err as Error).message || err) });
+    } finally {
+      cb.stage(0, null);
+    }
+  }
   const conc = Math.min(computeConcurrency(), jobs.length);
   const totalPages = jobs.length;
   if (sets.length > 1 || totalPages > 1)
-    cb.log(`[실행] ${sets.length}세트 · 총 ${totalPages}페이지, 동시 ${conc} 병렬`);
+    cb.log(`[실행] ${sets.length}세트 · 총 ${totalPages}건, 동시 ${conc} 병렬`);
   // 같은 실행에서 동일 원본 페이지가 여러 번 쓰이면 REF OCR을 1회만 수행
   const refWordsMemo = new Map<string, Promise<Word[] | null>>();
   let next = 0;
@@ -132,8 +226,19 @@ export async function runAll(
     try {
       while (next < jobs.length) {
         const index = next++;
-        const { setId, name, page, pageCount, ref, test } = jobs[index];
-        const pageTag = pageCount > 1 ? ` (${page}/${pageCount}p)` : "";
+        const { setId, name, page, pageCount, instance, instanceCount,
+                ref, test, preError } = jobs[index];
+        const inst = instance != null && instanceCount != null && instanceCount > 1
+          ? { instance, instanceCount } : {};
+        if (preError) {
+          // 다중 샘플 검출 실패 — 분석 없이 실패 결과만 남긴다.
+          cb.onResult(index, { name, setId, page, pageCount, error: preError,
+                               refFile: ref, testFile: test });
+          continue;
+        }
+        const pageTag = pageCount > 1 ? ` (${page}/${pageCount}p)`
+          : instanceCount && instanceCount > 1
+            ? ` (샘플 ${instance}/${instanceCount})` : "";
         const prefix = `[${name}${pageTag}] `;
         const tOne = performance.now();
         try {
@@ -182,13 +287,14 @@ export async function runAll(
           result.wallMs = Math.round(performance.now() - tOne);
           const art = buildDisplayArtifacts(result.findings, refCanvas, alignedCanvas);
           // refCanvas/alignedCanvas는 확대경·피드백 팝업의 원본 소스로 유지
-          cb.onResult(index, { name, setId, page, pageCount, result, ...art,
+          cb.onResult(index, { name, setId, page, pageCount, ...inst,
+                               result, ...art,
                                refCanvas, alignedCanvas,
                                refFile: ref, testFile: test });
         } catch (err) {
           // 실패해도 입력 파일 정보는 남긴다 — 오류 보고에 어떤 파일이었는지
           // 담고, 사용자가 그대로 다시 시도할 수 있게 한다.
-          cb.onResult(index, { name, setId, page, pageCount,
+          cb.onResult(index, { name, setId, page, pageCount, ...inst,
                                error: String((err as Error).message || err),
                                refFile: ref, testFile: test });
         }

@@ -291,7 +291,7 @@ export function feedbackCsv(results: ResultItem[]): string {
 // ---------------------------------------------------------------- 피드백 전송
 // 피드백은 맥미니 서버(feedback/feedback.jsonl)에 축적되어 오탐 튜닝의 입력이
 // 된다. 문제 부위 크롭 + 엔진 분석 데이터 + 원본 이미지(사용자 승인)를 보낸다.
-export const APP_VERSION = "2026-08-05.2";
+export const APP_VERSION = "2026-08-31.1";
 // same-origin 폴백: /app/이면 같은 서버 /feedback, hf.space 정적이면 없음.
 export function computeFeedbackEndpoints(hostname: string): string[] {
   return hostname.endsWith("hf.space") ? [] : ["/feedback"];
@@ -345,7 +345,9 @@ export async function buildFeedbackPayload(
       it.testFile ? fileToDataURL(it.testFile) : null,
     ]);
     items.push({
-      set: it.name,
+      // 다중 샘플이면 어느 샘플의 피드백인지 세트명에 같이 남긴다(재현용).
+      set: it.instance != null ? `${it.name} · 샘플 ${it.instance}` : it.name,
+      instance: it.instance,
       dims: { w: it.refCanvas.width, h: it.refCanvas.height },
       totalMs: it.result?.totalMs,
       findings: it.result?.findings,
@@ -575,13 +577,16 @@ const tag = (s: StoredSet) => ({
   setId: s.setId ?? 0,
   page: s.page ?? 1,
   pageCount: s.pageCount ?? 1,
+  instance: s.instance,
+  instanceCount: s.instanceCount,
 });
 
 export async function serializeResults(results: ResultItem[]): Promise<StoredSet[]> {
   const out: StoredSet[] = [];
   for (const it of results) {
     if (!it) continue;
-    const meta = { setId: it.setId, page: it.page, pageCount: it.pageCount };
+    const meta = { setId: it.setId, page: it.page, pageCount: it.pageCount,
+                   instance: it.instance, instanceCount: it.instanceCount };
     if (it.error || !it.alignedCanvas || !it.result) {
       out.push({ name: it.name, ...meta, error: it.error });
       continue;

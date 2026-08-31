@@ -13,9 +13,14 @@
   `python3 tools/hf_deploy.py` (빌드→업로드→실서비스 지문 검증까지 한 명령).
   엔진 수정은 재배포까지가 한 세트다 — 빠뜨리면 매일 03:10 `bench.sync`가
   배포 지문(`version.json`) 불일치 알림으로 잡는다.
-  원본 보관함은 IndexedDB에 두고 공용 서버(`inkspect-feedback`의 `/api/library`)와
-  파일 단위로 증분 동기화한다. 규모 한계는 `npm run bench:library`로 실측
-  (자세한 값은 `docs/원본보관함-영구저장-계획.md` §4-2).
+  원본 보관함은 **팀 공용 하나**다 — 서버(`inkspect-feedback`의 `/api/library`)가
+  정본이고 IndexedDB는 LRU 캐시(목록만 자동 동기화, 본체는 사용 시 다운로드,
+  삭제도 tombstone으로 전파). 비밀번호·로그인 없이 어느 기기에서 열든 같은
+  보관함이 보인다. 자세한 구조는 `docs/원본보관함-영구저장-계획.md` §4-3,
+  규모 실측은 §4-2.
+  다중 샘플 모드: 인쇄물 스캔 1장에 같은 라벨이 여러 개면 세트의 "다중 샘플"을
+  켠다 — 템플릿 매칭(0/90/180/270°)으로 샘플 위치를 찾아 샘플별로 나눠
+  검수한다(`web/src/pipeline/multisample.ts`, 패리티 대상 아님).
 - `compare_artwork.py` — 기준 Python 엔진(CLI). 브라우저판 정확도 검증
   (`web/tools/harness.cjs`)과 오탐 튜닝의 기준으로 유지.
 - `webapp.py` — 경량 지원 서버: `/app/` 정적 서빙 + `/feedback` 피드백 수집

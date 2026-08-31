@@ -14,7 +14,7 @@ import { applySetName, buildErrorReport, buildFeedbackPayload, copyToClipboard,
          hasFeedbackEndpoint, loadFbQueue, restoreResults, saveFbQueue,
          serializeResults, slimPayload, summarizeFeedbackForChat,
          trySendFeedback, type AdminEntry } from "./lib.ts";
-import { hasLibraryServer, pullLibraryFromServer, pushLibraryToServer,
+import { hasLibraryServer, syncLibraryWithServer,
          type SyncProgress } from "./server-library.ts";
 import { runAll, type RunSet } from "./runner.ts";
 import { ensureRasterPages } from "./pipeline/pdf.ts";
@@ -23,7 +23,12 @@ import type { FileEntry, ResultItem, SetFb } from "./types.ts";
 
 // 세트 = 한 품목. 원본/인쇄물 각각 여러 파일(각 파일은 PDF면 여러 페이지)을
 // 받아 페이지 목록으로 펼친다. 양쪽 총 페이지 수가 같아야 검수를 시작할 수 있다.
-interface Pair { id: number; ref: FileEntry[]; test: FileEntry[]; name?: string; }
+// multi(다중 샘플): 인쇄물 스캔 한 장에 같은 샘플이 여러 개 — 원본 1장·인쇄물
+// 1장만 받고, 샘플 위치를 자동 검출해 샘플별로 나눠 검수한다.
+interface Pair {
+  id: number; ref: FileEntry[]; test: FileEntry[]; name?: string;
+  multi?: boolean;
+}
 
 const pageCount = (side: FileEntry[]) =>
   side.reduce((s, e) => s + e.pages.length, 0);
@@ -76,10 +81,11 @@ export default function App() {
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [libStatus, setLibStatus] = useState(""); // 서버 동기화 안내
   const [hoverTip, setHoverTip] = useState(""); // 버튼 호버 설명
-  // 서버 보관함 동기화 — 비번 입력 프롬프트 상태
-  const [serverAct, setServerAct] = useState<"push" | "pull" | null>(null);
-  const [serverPw, setServerPw] = useState("");
+  // 공용 보관함 — 연결 절차·비밀번호 없음. 앱을 열면 곧바로 서버와 맞춘다.
   const [serverBusy, setServerBusy] = useState(false);
+  const [lastSync, setLastSync] = useState<number | null>(null);
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncAgainRef = useRef(false); // 동기화 중 변경이 또 생기면 한 번 더
   const [dragOverSec, setDragOverSec] = useState<string | null>(null);
   // 폴더를 드래그 중일 때 그 폴더 id — 자기 자신 위로는 드롭 표시를 하지 않는다.
   const [dragSec, setDragSec] = useState<string | null>(null);
@@ -121,6 +127,7 @@ export default function App() {
       for (const f of accepted)
         await saveArtwork(await hashFile(f), f, section || undefined);
       await refreshLibrary();
+      scheduleSync();
       setLibStatus(`보관함에 ${accepted.length}개 저장됨` +
         (accepted.length < files.length
           ? ` (${files.length - accepted.length}개는 형식이 맞지 않아 제외)` : ""));
@@ -163,6 +170,7 @@ export default function App() {
         await Promise.all(newEntries.map((e) =>
           hashFile(e.file).then((h) => saveArtwork(h, e.file)).catch(() => {})));
         await refreshLibrary();
+        scheduleSync();
       }
     } catch (err) {
       setError(`파일 처리 실패: ` + String((err as Error).message || err));
@@ -187,7 +195,16 @@ export default function App() {
   // 을 바꾼다(미분류면 기본값 유지). 원본 면에 넣을 때만 세트명을 반영한다.
   const addArtworkToPair = async (
     id: number, which: "ref" | "test", hash: string) => {
+    // 로컬에 본체가 없으면 서버에서 내려받는다 — 그동안 안내를 띄운다.
+    const cached = recent.find((a) => a.hash === hash);
+    if (cached && !cached.blob)
+      setLibStatus(`"${cached.name}" 서버에서 내려받는 중…`);
     const f = await getArtworkFile(hash);
+    if (cached && !cached.blob) {
+      setLibStatus(f ? "" : `"${cached.name}"을(를) 내려받지 못했습니다 — ` +
+        "네트워크를 확인하고 다시 시도해주세요.");
+      if (f) refreshLibrary(); // ☁ 표시 해제(이제 로컬에 있음)
+    }
     if (!f) return;
     const art = recent.find((a) => a.hash === hash);
     const sec = art?.section && sections.find((s) => s.id === art.section);
@@ -219,6 +236,8 @@ export default function App() {
     // 보관함 유실 1차 방어 — 저장소를 'persistent'로 승격 요청(자동 삭제 방지).
     requestPersistentStorage();
     refreshLibrary();
+    // 공용 보관함 — 앱을 열면 곧바로 서버와 목록을 맞춘다(연결 절차 없음).
+    doSync(true);
     flushFbQueue().then((n) => {
       if (n) setFbStatus(`보관 중이던 피드백 ${n}건을 서버로 전송했습니다.`);
     });
@@ -264,22 +283,28 @@ export default function App() {
       await createSection(name, parent);
       if (parent) setExpanded((x) => ({ ...x, [parent]: true })); // 부모 펼쳐 보이기
       refreshLibrary();
+      scheduleSync();
     }
   };
   const onRenameSection = async (id: string, name: string) => {
     setEditingSection(null);
-    if (name.trim()) { await renameSection(id, name.trim()); refreshLibrary(); }
+    if (name.trim()) {
+      await renameSection(id, name.trim()); refreshLibrary(); scheduleSync();
+    }
   };
   const onDeleteSection = async (id: string) => {
     await deleteSection(id);
     setSelectedSection((cur) => (cur === id ? null : cur));
     refreshLibrary();
+    scheduleSync();
   };
   const onDeleteArtwork = async (hash: string) => {
-    await deleteArtwork(hash); refreshLibrary();
+    await deleteArtwork(hash); refreshLibrary(); scheduleSync();
   };
   const onSetSection = async (hash: string, section: string) => {
-    await setArtworkSection(hash, section || undefined); refreshLibrary();
+    await setArtworkSection(hash, section || undefined);
+    refreshLibrary();
+    scheduleSync();
   };
   // 폴더를 다른 폴더 안으로 이동. 자기 자신·자기 하위로는 못 옮긴다(cache에서 차단).
   const onMoveSection = async (id: string, parent: string) => {
@@ -290,41 +315,54 @@ export default function App() {
     }
     if (parent) setExpanded((x) => ({ ...x, [parent]: true }));
     refreshLibrary();
+    scheduleSync();
   };
 
-  // 서버 보관함 동기화(안 A) — 백업 수단은 이것 하나로 통일했다. 로컬 파일
-  // 백업은 사용자가 매번 직접 받아둬야 하고 그 PC가 고장나면 같이 사라져,
-  // 공용 서버 쪽이 팀 공유·기기 교체까지 함께 막아준다.
-  // 파일 단위 증분 전송이라 이미 서버에 있는 원본은 건너뛴다.
+  // 공용 보관함 동기화 — 서버가 원본이고 모두가 같은 보관함 하나를 본다.
+  // 앱을 열 때 + 보관함이 바뀔 때마다 자동으로 맞춘다(수동 버튼도 남겨둠).
+  // 파일 본체는 내려받지 않고 목록만 맞추므로 보관함이 커도 몇 초면 끝난다.
   const onSyncProgress = (p: SyncProgress) =>
     setLibStatus(p.total > 1
       ? `${p.phase} ${p.done}/${p.total}…`
       : `${p.phase}…`);
 
-  const runServerSync = async () => {
-    const act = serverAct, pw = serverPw;
-    setServerAct(null); setServerPw("");
-    if (!act || !pw) return;
+  const syncBusyRef = useRef(false);
+  const doSync = async (quiet = false) => {
+    if (!hasLibraryServer) return;
+    if (syncBusyRef.current) { syncAgainRef.current = true; return; }
+    syncBusyRef.current = true;
     setServerBusy(true);
-    setLibStatus(act === "push" ? "서버로 백업 중…" : "서버에서 불러오는 중…");
+    if (!quiet) setLibStatus("공용 보관함 동기화 중…");
     try {
-      if (act === "push") {
-        const r = await pushLibraryToServer(pw, onSyncProgress);
-        setLibStatus(`서버 백업 완료 — 원본 ${r.artworks}개 · 폴더 ${r.sections}개` +
-          ` (새로 올림 ${r.moved}개 · 이미 있던 것 ${r.skipped}개)`);
-      } else {
-        const r = await pullLibraryFromServer(pw, onSyncProgress);
-        if (!r) { setLibStatus("서버에 저장된 백업이 아직 없습니다."); return; }
-        await refreshLibrary();
-        setLibStatus(`서버에서 불러옴 — 원본 ${r.artworks}개 · 폴더 ${r.sections}개` +
-          ` (새로 받음 ${r.moved}개 · 이미 있던 것 ${r.skipped}개)`);
-      }
+      const r = await syncLibraryWithServer(quiet ? undefined : onSyncProgress);
+      await refreshLibrary();
+      setLastSync(Date.now());
+      setLibStatus(quiet ? "" :
+        `동기화 완료 — 원본 ${r.artworks}개 · 폴더 ${r.sections}개` +
+        (r.uploaded ? ` · 새로 올림 ${r.uploaded}개` : "") +
+        (r.freed ? ` · 로컬 공간 확보 ${r.freed}개` : ""));
     } catch (e) {
-      setLibStatus((act === "push" ? "서버 백업 실패: " : "불러오기 실패: ") +
+      // 서버가 잠깐 안 되면 로컬 보관함으로 계속 쓰고, 다음 변경 때 다시 맞춘다.
+      setLibStatus("동기화 실패(로컬 보관함은 그대로): " +
         String((e as Error).message || e));
     } finally {
+      syncBusyRef.current = false;
       setServerBusy(false);
+      if (syncAgainRef.current) {
+        syncAgainRef.current = false;
+        scheduleSync();
+      }
     }
+  };
+
+  // 보관함이 바뀐 뒤 잠깐 뜸을 들였다가 동기화한다(연속 조작을 한 번에).
+  const scheduleSync = () => {
+    if (!hasLibraryServer) return;
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      syncTimerRef.current = null;
+      doSync(true);
+    }, 2500);
   };
 
   // 백업/복원 버튼 호버·포커스 시 간단한 설명을 아래 안내 박스로 보여준다
@@ -341,10 +379,14 @@ export default function App() {
   const storageNote = (() => {
     if (!storage?.quota) return null;
     const pct = storage.usage / storage.quota;
-    const text = `원본 ${recent.length}개 · ${fmtMB(storage.usage)} 사용` +
+    const cachedN = recent.filter((a) => a.blob).length;
+    const text = `원본 ${recent.length}개` +
+      (cachedN < recent.length ? ` (이 기기에 ${cachedN}개)` : "") +
+      ` · ${fmtMB(storage.usage)} 사용` +
       ` / 한도 ${fmtMB(storage.quota)} (${Math.round(pct * 100)}%)` +
       (storage.persisted ? "" : " · 자동삭제 방지 미적용");
-    return { text, warn: pct > 0.8 || !storage.persisted };
+    // 서버가 정본이라 로컬이 차도 자동으로 비워진다 — 용량은 경고하지 않는다.
+    return { text, warn: !storage.persisted };
   })();
 
   // 보관함 원본 한 행: 클릭해 투입 + 드래그해서 폴더 이동 + 삭제.
@@ -356,9 +398,12 @@ export default function App() {
          }}>
       <span className="art-grip" title="드래그해서 폴더로 이동">⠿</span>
       <button type="button" className="artitem" disabled={running}
-              title={`${a.name} (${fmtMB(a.size)}) — 클릭해서 원본에 투입`}
+              title={`${a.name} (${fmtMB(a.size)}) — 클릭해서 원본에 투입` +
+                     (a.blob ? "" : " (서버에서 내려받음)")}
               onClick={() => applyArtwork(a.hash)}>
         <span className="artname">{a.name}</span>
+        {/* blob이 로컬에 없는 항목 — 서버에만 있고 쓸 때 내려받는다 */}
+        {!a.blob && <span className="art-cloud" title="서버에 보관 중 — 사용 시 내려받음">☁</span>}
         <span className="artsize">{fmtMB(a.size)}</span>
       </button>
       <button type="button" className="art-del" disabled={running}
@@ -461,12 +506,14 @@ export default function App() {
   };
 
   // 세트가 완성되려면 원본·인쇄물 모두 1장 이상이고 총 페이지 수가 같아야 한다.
-  const pairComplete = (p: Pair) =>
-    pageCount(p.ref) > 0 && pageCount(p.ref) === pageCount(p.test);
+  // 다중 샘플 세트는 원본 1장 + 인쇄물 스캔 1장이어야 한다(샘플 수는 자동 검출).
+  const pairComplete = (p: Pair) => p.multi
+    ? pageCount(p.ref) === 1 && pageCount(p.test) === 1
+    : pageCount(p.ref) > 0 && pageCount(p.ref) === pageCount(p.test);
   const completePairs = pairs.filter(pairComplete);
   // 모든 세트가 완성돼야 검수 시작 가능. 페이지 수 불일치 세트가 있으면 안내.
   const allComplete = pairs.length > 0 && completePairs.length === pairs.length;
-  const mismatch = pairs.some((p) =>
+  const mismatch = pairs.some((p) => !p.multi &&
     pageCount(p.ref) > 0 && pageCount(p.test) > 0 &&
     pageCount(p.ref) !== pageCount(p.test));
 
@@ -493,6 +540,7 @@ export default function App() {
         name: p.name?.trim() || `세트 ${i + 1}`,
         refPages: flatPages(p.ref),
         testPages: flatPages(p.test),
+        multiSample: p.multi,
       }));
       await runAll(
         sets,
@@ -780,7 +828,11 @@ export default function App() {
       </span>
     );
 
-  // 한 페이지 결과 항목(헤드 + 피드백 상세 + 전송). multi면 "페이지 N"으로 표기.
+  // 세트 내 한 결과의 라벨 — 다중 샘플이면 "샘플 N", 다중 페이지면 "페이지 N".
+  const pageLabel = (item: ResultItem) =>
+    item.instance != null ? `샘플 ${item.instance}` : `페이지 ${item.page}`;
+
+  // 한 페이지 결과 항목(헤드 + 피드백 상세 + 전송). multi면 "페이지/샘플 N" 표기.
   const renderPageItem = (item: ResultItem, gi: number, multi: boolean) => {
     const nDef = item.defects?.length ?? 0;
     const rIdx = results.indexOf(item);
@@ -807,7 +859,7 @@ export default function App() {
       : nDef ? <span className="badge bad-badge">결함 {nDef}</span>
         : <span className="badge ok-badge">정상</span>;
     return (
-      <div key={item.setId + "-" + item.page}
+      <div key={item.setId + "-" + item.page + "-" + (item.instance ?? 0)}
            className={"setitem" + (gi === selected ? " on" : "") + (multi ? " page" : "")}>
         <div className="sethead" role="button" tabIndex={0}
              onClick={() => setSelected(gi)}
@@ -818,7 +870,7 @@ export default function App() {
              }}>
           <span className="sethead-main">
             {multi
-              ? <span className="setname">페이지 {item.page}</span>
+              ? <span className="setname">{pageLabel(item)}</span>
               : renderSetLabel(item.setId, item.name, item.refFile?.name)}
             {!multi && analyzedAt && (
               <span className="setdate">{fmtDateTime(analyzedAt)}</span>)}
@@ -1126,12 +1178,12 @@ export default function App() {
             <>
               <div className="top">
                 <p className="summary" style={{ margin: 0 }}>
-                  {setCount}세트 · {loaded.length}페이지 분석 — 총 결함{" "}
+                  {setCount}세트 · {loaded.length}건 분석 — 총 결함{" "}
                   {totalDefects
                     ? <b className="bad">{totalDefects}건</b>
                     : <b className="ok">0건</b>}
                   {loaded.some((r) => r.error) &&
-                    <span className="err"> · 실패 {loaded.filter((r) => r.error).length}페이지</span>}
+                    <span className="err"> · 실패 {loaded.filter((r) => r.error).length}건</span>}
                 </p>
                 <span className="topactions">
                   {hasFeedback && (
@@ -1167,7 +1219,10 @@ export default function App() {
                               g.items[0].item.refFile?.name)}
                             {analyzedAt && (
                               <span className="setdate">
-                                {fmtDateTime(analyzedAt)} · {g.items.length}장</span>)}
+                                {fmtDateTime(analyzedAt)} ·{" "}
+                                {g.items[0].item.instance != null
+                                  ? `샘플 ${g.items.length}개`
+                                  : `${g.items.length}장`}</span>)}
                           </span>
                           {gErr
                             ? <span className="badge err-badge">일부 실패</span>
@@ -1191,7 +1246,7 @@ export default function App() {
                           <button type="button" key={gi}
                                   className={"pagetab" + (gi === selected ? " on" : "")}
                                   onClick={() => setSelected(gi)}>
-                            페이지 {item.page}
+                            {pageLabel(item)}
                             {item.error ? " ⚠"
                               : item.defects?.length ? ` · 결함 ${item.defects.length}`
                                 : " · 정상"}
@@ -1230,7 +1285,7 @@ export default function App() {
         <div className="inspect">
           <aside className="artlib card">
             <div className="artlib-title">
-              <span>원본 보관함</span>
+              <span>공용 보관함</span>
               <button type="button" className="sec-add" disabled={running}
                       title={selectedSection
                         ? "선택한 폴더 아래에 하위 폴더를 만듭니다"
@@ -1239,31 +1294,24 @@ export default function App() {
             </div>
             {hasLibraryServer && (
               <div className="lib-tools">
+                <span className="lib-sync-state"
+                      {...tip("팀 전원이 어느 기기에서 열든 이 보관함 하나를 봅니다. 추가·삭제·폴더 정리는 자동으로 서버와 맞춰져요.")}>
+                  {serverBusy ? "⟳ 동기화 중…"
+                    : lastSync
+                      ? `☁ 공용 · ${new Date(lastSync)
+                          .toLocaleTimeString("ko-KR",
+                            { hour: "2-digit", minute: "2-digit" })} 동기화`
+                      : "☁ 공용 보관함"}
+                </span>
                 <button type="button" disabled={running || serverBusy}
-                        onClick={() => { setServerAct("push"); setServerPw(""); }}
-                        {...tip("보관함을 공용 서버에 올려 팀과 공유하고 유실에 대비합니다. 이미 올라간 원본은 건너뛰어요. 비밀번호가 필요해요.")}>
-                  ☁ 서버백업</button>
-                <button type="button" disabled={running || serverBusy}
-                        onClick={() => { setServerAct("pull"); setServerPw(""); }}
-                        {...tip("공용 서버의 보관함을 받아 내 보관함에 합칩니다. 없는 원본만 내려받아요. 비밀번호가 필요해요.")}>
-                  ☁ 불러오기</button>
+                        onClick={() => doSync()}
+                        {...tip("서버와 지금 바로 맞춥니다(평소에는 자동).")}>
+                  동기화</button>
               </div>
             )}
             <div className="lib-tip-anchor">
               {hoverTip && <p className="lib-tip" role="tooltip">{hoverTip}</p>}
             </div>
-            {serverAct && (
-              <div className="sec-edit">
-                <input autoFocus type="password" value={serverPw}
-                  placeholder={serverAct === "push" ? "백업 비밀번호" : "불러오기 비밀번호"}
-                  onChange={(e) => setServerPw(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") runServerSync();
-                    if (e.key === "Escape") { setServerAct(null); setServerPw(""); }
-                  }} />
-                <button type="button" onClick={runServerSync}>확인</button>
-              </div>
-            )}
             {libStatus && <p className="lib-status">{libStatus}</p>}
             {selectedSection && (
               <div className="sec-selbar">
@@ -1327,12 +1375,27 @@ export default function App() {
             <div className="sets">
               {pairs.map((p, i) => {
                 const rc = pageCount(p.ref), tc = pageCount(p.test);
-                const bad = rc > 0 && tc > 0 && rc !== tc;
-                const okMatch = rc > 0 && rc === tc;
+                const bad = p.multi
+                  ? (rc > 1 || tc > 1)
+                  : rc > 0 && tc > 0 && rc !== tc;
+                const okMatch = p.multi
+                  ? rc === 1 && tc === 1
+                  : rc > 0 && rc === tc;
                 return (
                   <div className="pair card" key={p.id}>
                     <div className="pairhead">
                       <b>{p.name || `세트 ${i + 1}`}</b>
+                      <label className="opt multi-opt"
+                             title={"인쇄물 스캔 한 장에 같은 샘플이 여러 개 " +
+                                    "찍혀 있으면 켜세요. 샘플 위치를 자동으로 " +
+                                    "찾아 샘플별로 나눠 검수합니다."}>
+                        <input type="checkbox" checked={!!p.multi}
+                               disabled={running}
+                               onChange={(e) => setPairs((ps) => ps.map((x) =>
+                                 x.id === p.id
+                                   ? { ...x, multi: e.target.checked } : x))} />
+                        {" "}다중 샘플
+                      </label>
                       {pairs.length > 1 && (
                         <button type="button" className="rm" disabled={running}
                                 onClick={() => removePair(p.id)}>삭제</button>
@@ -1345,7 +1408,10 @@ export default function App() {
                         onRemove={(n) => removeEntry(p.id, "ref", n)}
                         onReorder={(f, t) => reorderEntry(p.id, "ref", f, t)}
                         onAddArtwork={(h) => addArtworkToPair(p.id, "ref", h)} />
-                      <MultiDropZone label="② 인쇄물" entries={p.test}
+                      <MultiDropZone
+                        label={p.multi ? "② 인쇄물 (샘플 여러 개 스캔 1장)"
+                                       : "② 인쇄물"}
+                        entries={p.test}
                         busy={!!converting[`${p.id}:test`]} disabled={running}
                         onAdd={(fs) => addFiles(p.id, "test", fs)}
                         onRemove={(n) => removeEntry(p.id, "test", n)}
@@ -1354,9 +1420,15 @@ export default function App() {
                     </div>
                     {(rc > 0 || tc > 0) && (
                       <div className={"pairmatch" + (bad ? " bad" : okMatch ? " ok" : "")}>
-                        원본 {rc}장 · 인쇄물 {tc}장
-                        {okMatch && " · 매칭 ✓"}
-                        {bad && " · 페이지 수가 다릅니다 ✗"}
+                        {p.multi ? <>
+                          원본 {rc}장 · 인쇄물 스캔 {tc}장
+                          {okMatch && " · 샘플 수는 자동 검출 ✓"}
+                          {bad && " · 다중 샘플은 원본 1장 + 스캔 1장이어야 합니다 ✗"}
+                        </> : <>
+                          원본 {rc}장 · 인쇄물 {tc}장
+                          {okMatch && " · 매칭 ✓"}
+                          {bad && " · 페이지 수가 다릅니다 ✗"}
+                        </>}
                       </div>
                     )}
                   </div>

@@ -125,13 +125,34 @@ export async function syncLibraryWithServer(
 
     // 서버에 v1(전체 base64 백업)만 있는 경우 — 1회성 이행: 통째로 되살린 뒤
     // 아래의 일반 경로가 v3 매니페스트를 새로 올린다.
+    let migratedV1 = false;
     if (!remote && server.manifestUrl && server.files.length === 0) {
       const v1 = await fetchV1Backup(server.manifestUrl);
-      if (v1) await importLibrary(v1);
+      if (v1) { await importLibrary(v1); migratedV1 = true; }
     }
+
+    // 서버에 목록(매니페스트)이 있는데 읽지 못했다면 여기서 멈춘다. 그대로
+    // 진행하면 내 로컬 상태만 담긴 매니페스트로 서버 목록을 통째로 덮어써,
+    // 남이 올린 항목까지 사라진다 — 실제로 한 번 비웠다. 파일 blob은 남지만
+    // 이름·폴더가 통째로 날아가고, 서버가 최근 5개 이력만 보관하므로 같은 일이
+    // 몇 번 반복되면 되돌릴 수도 없다.
+    if (!remote && server.manifestUrl && !migratedV1)
+      throw new Error("서버 목록을 읽지 못해 동기화를 멈췄습니다 " +
+        "(로컬 보관함은 그대로) — 잠시 후 다시 시도해주세요.");
 
     const local = await exportManifest();
     const merged = mergeManifests(local, remote);
+
+    // 안전장치 — 삭제 기록 없이 서버 항목이 사라지는 매니페스트는 올리지 않는다.
+    // 병합이 합집합이라 정상 경로에서는 절대 걸리지 않는다. 걸린다면 어딘가
+    // 잘못된 것이므로, 조용히 덮어쓰는 대신 멈추는 쪽이 안전하다.
+    const droppedSilently = (remote?.artworks ?? []).filter((a) =>
+      !merged.artworks.some((m) => m.hash === a.hash) &&
+      !merged.deleted?.artworks?.[a.hash]);
+    if (droppedSilently.length)
+      throw new Error(`동기화를 멈췄습니다 — 삭제하지 않은 원본 ` +
+        `${droppedSilently.length}개가 목록에서 사라질 뻔했습니다.`);
+
     const serverUrls = new Map(server.files.map((f) => [f.hash, f.url]));
 
     // 서버에 없는 파일 중 로컬에 본체가 있는 것만 올린다.

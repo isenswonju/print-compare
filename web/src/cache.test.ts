@@ -416,7 +416,7 @@ describe("hashFile", () => {
 // 세션 스토어에 원시 레코드를 직접 넣는 헬퍼(레거시 포맷 재현용).
 function rawPutSession(value: unknown): Promise<void> {
   return new Promise((res, rej) => {
-    const req = indexedDB.open("artwork-compare-cache", 4);
+    const req = indexedDB.open("artwork-compare-cache");
     req.onsuccess = () => {
       const db = req.result;
       const t = db.transaction("session", "readwrite");

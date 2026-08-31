@@ -5,12 +5,17 @@
 //  * artworks: 공용 보관함의 로컬 사본. 서버가 원본이고 로컬은 캐시다 —
 //    목록(메타데이터)은 전부 두되, 파일 본체(blob)는 서버에서 필요할 때
 //    내려받고 저장 공간이 부족해지면 오래 안 쓴 것부터 비운다(pruneBlobCache).
-//  * tombstones: 삭제 기록. 공용 보관함에서 "지웠다"는 사실도 기기 간에
-//    전파돼야 해서, 삭제 시각을 남겨 매니페스트에 실어 보낸다.
+//  * session: 마지막 검수 결과(키 "last")와 삭제 기록(키 "tombstones").
+//    공용 보관함에서 "지웠다"는 사실도 기기 간에 전파돼야 해서, 삭제 시각을
+//    남겨 매니페스트에 실어 보낸다.
 import type { PipelineResult, SetFb, Word } from "./types.ts";
 
 const DB_NAME = "artwork-compare-cache";
-const DB_VER = 4;
+// 필요한 오브젝트 스토어. **버전 번호로 스키마를 올리지 않는다** — 아래 openDB 주석 참고.
+const STORES = ["refWords", "artworks", "session", "sections"] as const;
+// 삭제 기록은 새 스토어를 만들지 않으려고 session 스토어의 이 키에 통째로 둔다
+// (session은 "last" 키만 쓰던 범용 키-값 스토어라 충돌하지 않는다).
+const TOMB_KEY = "tombstones";
 // 결과 세션 보존 정책 (일반적인 웹 도구 관례): 최근 1세션만, 7일 후 만료.
 // 브라우저 안에만 저장되며 서버로 가지 않는다.
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -42,40 +47,49 @@ export interface Section {
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
-// DB 버전이 올라갈 때(스토어 추가) IndexedDB는 **다른 탭이 옛 버전으로 열어둔
-// 연결이 전부 닫힐 때까지** 업그레이드를 시작하지 않는다. 이때 onblocked를
-// 처리하지 않으면 open이 성공도 실패도 하지 않고 영원히 매달리고, 보관함
-// 전체가 조용히 멈춘다(실제로 v3→v4에서 겪었다). 그래서
-//  · onblocked   — 무한 대기 대신 무엇을 해야 하는지 알려주는 오류로 바꾼다.
-//  · onversionchange — 다른 탭이 더 새 버전을 원하면 내 연결을 놓아준다.
-//    (이게 있으면 앞으로의 버전 업은 이 상황 자체가 생기지 않는다)
-function openDB(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise;
-  const p = new Promise<IDBDatabase>((res, rej) => {
-    const req = indexedDB.open(DB_NAME, DB_VER);
+// 버전 번호를 올려 스키마를 바꾸지 않는다. IndexedDB는 버전이 올라가면
+// **다른 탭이 옛 버전으로 열어둔 연결이 전부 닫힐 때까지** 업그레이드를
+// 시작하지 않는데, 이 앱은 여러 탭에 띄워두고 쓰는 도구라 그 조건이 늘 깨진다.
+// 실제로 v3→v4(스토어 추가)에서 open이 성공도 실패도 blocked도 없이 영원히
+// 매달려 보관함이 통째로 멈췄다. 그래서
+//  · 버전 없이 연다 — 업그레이드를 유발하지 않으니 막힐 일이 없다.
+//  · 스토어가 실제로 없을 때만(신규 브라우저) 버전+1로 다시 열어 만든다.
+//    이 경로는 DB가 비어 있을 때뿐이라 붙들고 있는 다른 탭이 없다.
+// 새 데이터를 넣고 싶으면 스토어를 늘리지 말고 기존 스토어의 키를 쓴다
+// (삭제 기록을 session/TOMB_KEY에 두는 이유다).
+function rawOpen(version?: number): Promise<IDBDatabase> {
+  return new Promise((res, rej) => {
+    const req = version === undefined
+      ? indexedDB.open(DB_NAME) : indexedDB.open(DB_NAME, version);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains("refWords"))
-        db.createObjectStore("refWords");
-      if (!db.objectStoreNames.contains("artworks"))
-        db.createObjectStore("artworks");
-      if (!db.objectStoreNames.contains("session"))
-        db.createObjectStore("session");
-      if (!db.objectStoreNames.contains("sections"))
-        db.createObjectStore("sections");
-      if (!db.objectStoreNames.contains("tombstones"))
-        db.createObjectStore("tombstones");
+      for (const s of STORES)
+        if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
     };
     req.onblocked = () => rej(new Error(
       "이 앱이 열려 있는 다른 탭·창 때문에 보관함을 열지 못했습니다 — " +
       "다른 탭을 모두 닫고 새로고침해주세요."));
     req.onsuccess = () => {
       const db = req.result;
+      // 다른 탭이 업그레이드를 원하면 내 연결을 놓아준다(내가 막지 않도록).
       db.onversionchange = () => { db.close(); dbPromise = null; };
       res(db);
     };
     req.onerror = () => rej(req.error);
   });
+}
+
+function openDB(): Promise<IDBDatabase> {
+  if (dbPromise) return dbPromise;
+  const p = (async () => {
+    let db = await rawOpen();
+    if (STORES.some((s) => !db.objectStoreNames.contains(s))) {
+      const next = db.version + 1;
+      db.close();
+      db = await rawOpen(next);
+    }
+    return db;
+  })();
   // 실패를 캐시하면 새로고침 전까지 영구 실패한다 — 다음 호출이 다시 시도하게.
   p.catch(() => { if (dbPromise === p) dbPromise = null; });
   dbPromise = p;
@@ -138,46 +152,33 @@ export type Tombstones = {
 };
 
 export async function listTombstones(): Promise<Tombstones> {
-  const out: Tombstones = { artworks: {}, sections: {} };
   try {
-    const db = await openDB();
-    await new Promise<void>((res, rej) => {
-      const cur = db.transaction("tombstones", "readonly")
-        .objectStore("tombstones").openCursor();
-      cur.onsuccess = () => {
-        const c = cur.result;
-        if (!c) return res();
-        const key = String(c.key);
-        const at = (c.value as { at: number }).at;
-        if (key.startsWith("a:")) out.artworks[key.slice(2)] = at;
-        else if (key.startsWith("s:")) out.sections[key.slice(2)] = at;
-        c.continue();
-      };
-      cur.onerror = () => rej(cur.error);
-    });
-  } catch { /* 무시 */ }
-  return out;
+    const rec = await tx<Tombstones>("session", "readonly",
+      (s) => s.get(TOMB_KEY));
+    return { artworks: rec?.artworks ?? {}, sections: rec?.sections ?? {} };
+  } catch { return { artworks: {}, sections: {} }; }
 }
 
-const putTombstone = (key: string) =>
-  tx("tombstones", "readwrite", (s) => s.put({ at: Date.now() }, key))
-    .catch(() => {});
-const dropTombstone = (key: string) =>
-  tx("tombstones", "readwrite", (s) => s.delete(key)).catch(() => {});
+// 기록 1건 추가/삭제 — 맵 하나를 통째로 읽고 쓴다(항목 수가 적어 충분하다).
+async function editTombstones(
+  fn: (t: Tombstones) => void): Promise<void> {
+  try {
+    const t = await listTombstones();
+    fn(t);
+    await tx("session", "readwrite", (s) => s.put(t, TOMB_KEY));
+  } catch { /* 무시 */ }
+}
+
+const putTombstone = (kind: "artworks" | "sections", id: string) =>
+  editTombstones((t) => { t[kind][id] = Date.now(); });
+const dropTombstone = (kind: "artworks" | "sections", id: string) =>
+  editTombstones((t) => { delete t[kind][id]; });
 
 // 동기화 반영 후 필요 없어진 기록 정리(병합 결과에 반영된 것만 남긴다).
 export async function replaceTombstones(t: Tombstones): Promise<void> {
   try {
-    const db = await openDB();
-    await new Promise<void>((res, rej) => {
-      const trans = db.transaction("tombstones", "readwrite");
-      const s = trans.objectStore("tombstones");
-      s.clear();
-      for (const [h, at] of Object.entries(t.artworks)) s.put({ at }, "a:" + h);
-      for (const [id, at] of Object.entries(t.sections)) s.put({ at }, "s:" + id);
-      trans.oncomplete = () => res();
-      trans.onerror = () => rej(trans.error);
-    });
+    await tx("session", "readwrite", (s) => s.put(
+      { artworks: t.artworks ?? {}, sections: t.sections ?? {} }, TOMB_KEY));
   } catch { /* 무시 */ }
 }
 
@@ -194,14 +195,14 @@ export async function saveArtwork(
               blob: file, lastUsed: Date.now(), updatedAt: Date.now(),
               url: existing?.url,
               section: existing ? existing.section : section }, hash));
-    await dropTombstone("a:" + hash);
+    await dropTombstone("artworks", hash);
   } catch { /* 캐시 실패는 기능에 영향 없음 */ }
 }
 
 export async function deleteArtwork(hash: string): Promise<void> {
   try {
     await tx("artworks", "readwrite", (s) => s.delete(hash));
-    await putTombstone("a:" + hash);
+    await putTombstone("artworks", hash);
   } catch { /* 무시 */ }
 }
 
@@ -314,7 +315,7 @@ export async function deleteSection(
     const target = await tx<Section>("sections", "readonly", (s) => s.get(id));
     const parentId = target?.parentId;
     await tx("sections", "readwrite", (s) => s.delete(id));
-    if (!opts?.remote) await putTombstone("s:" + id);
+    if (!opts?.remote) await putTombstone("sections", id);
     const secs = await listSections();
     await Promise.all(secs.filter((s) => s.parentId === id).map((s) =>
       tx("sections", "readwrite", (st) =>

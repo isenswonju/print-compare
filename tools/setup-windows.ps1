@@ -5,6 +5,7 @@
 #>
 
 $ErrorActionPreference = "Continue"
+$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
@@ -31,8 +32,25 @@ Write-Host ""
 Write-Host "  인쇄 검수 도구 — 초기 세팅" -ForegroundColor White
 Write-Host "  폴더: $Root" -ForegroundColor DarkGray
 
-# ---------------------------------------------------------------- 1. Node.js
-Head "1/6  Node.js (앱을 빌드하는 데 필요)"
+# ----------------------------------------------------------- 1. Git + GitHub
+Head "1/8  Git과 GitHub (저장·자동 배포에 필요)"
+if (-not (Has "git")) { TryWinget "Git.Git" "Git" | Out-Null }
+if (-not (Has "gh"))  { TryWinget "GitHub.cli" "GitHub 로그인 도구" | Out-Null }
+if (Has "git") { $ok += "Git $(git --version)" }
+else { $fail += "Git — 설치.bat 을 한 번 더 실행하세요." }
+if (Has "gh") {
+  gh auth status --hostname github.com 2>$null | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "  GitHub 브라우저 로그인이 열립니다. 회사 계정으로 승인하세요." -ForegroundColor Yellow
+    gh auth login --hostname github.com --git-protocol https --web
+  }
+  gh auth status --hostname github.com 2>$null | Out-Null
+  if ($LASTEXITCODE -eq 0) { $ok += "GitHub 로그인" }
+  else { $fail += "GitHub 로그인 — 브라우저 승인을 마친 뒤 설치.bat 을 다시 실행하세요." }
+} else { $fail += "GitHub 로그인 도구 — 설치.bat 을 한 번 더 실행하세요." }
+
+# ---------------------------------------------------------------- 2. Node.js
+Head "2/8  Node.js (앱을 빌드하는 데 필요)"
 if (Has "node") {
   $v = (node -v)
   Write-Host "  이미 설치됨: $v" -ForegroundColor Green
@@ -48,10 +66,18 @@ if (Has "node") {
   }
 }
 
-# ------------------------------------------------------------------ 2. Python
-Head "2/6  Python (정확도 검사와 배포에 필요)"
+# ------------------------------------------------------------------ 3. Python
+Head "3/8  Python 3.12 (정확도 검사와 배포에 필요)"
 $py = $null
-foreach ($c in @("python", "py")) { if (Has $c) { $py = $c; break } }
+$launcher = Get-Command py -ErrorAction SilentlyContinue
+if ($launcher) {
+  $candidate = & py -3.12 -c "import sys; print(sys.executable)" 2>$null
+  if ($LASTEXITCODE -eq 0 -and $candidate) { $py = "$candidate".Trim() }
+}
+if (-not $py -and (Has "python")) {
+  $candidate = & python -c "import sys; print(sys.executable if sys.version_info[:2] == (3,12) else '')" 2>$null
+  if ($candidate) { $py = "$candidate".Trim() }
+}
 if ($py) {
   $v = (& $py --version 2>&1)
   Write-Host "  이미 설치됨: $v" -ForegroundColor Green
@@ -60,7 +86,10 @@ if ($py) {
   if (-not (TryWinget "Python.Python.3.12" "Python")) {
     Write-Host "  자동 설치를 못 했습니다." -ForegroundColor Red
   }
-  foreach ($c in @("python", "py")) { if (Has $c) { $py = $c; break } }
+  if (Has "py") {
+    $candidate = & py -3.12 -c "import sys; print(sys.executable)" 2>$null
+    if ($LASTEXITCODE -eq 0 -and $candidate) { $py = "$candidate".Trim() }
+  }
   if ($py) { $ok += (& $py --version 2>&1) }
   else {
     $fail += "Python — https://www.python.org/downloads/ 에서 설치(설치 화면의 'Add to PATH' 를 반드시 체크)"
@@ -69,8 +98,8 @@ if ($py) {
   }
 }
 
-# -------------------------------------------------------------------- 3. Codex
-Head "3/6  Codex (대화로 코드를 고쳐주는 도구)"
+# -------------------------------------------------------------------- 4. Codex
+Head "4/8  Codex (대화로 코드를 고쳐주는 도구)"
 if (Has "codex") {
   Write-Host "  이미 설치됨: $(codex --version 2>&1)" -ForegroundColor Green
   $ok += "Codex"
@@ -84,9 +113,19 @@ if (Has "codex") {
 } else {
   $fail += "Codex — Node.js 가 먼저 설치돼야 합니다."
 }
+if (Has "codex") {
+  codex login status 2>$null | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Codex 브라우저 로그인이 열립니다. 담당자 개인 계정도 괜찮습니다." -ForegroundColor Yellow
+    codex login
+  }
+  codex login status 2>$null | Out-Null
+  if ($LASTEXITCODE -eq 0) { $ok += "Codex 로그인" }
+  else { $warn += "Codex 로그인 — 시작.bat 실행 후 로그인 안내를 따라도 됩니다." }
+}
 
 # ------------------------------------------------------- 4. 앱 빌드용 라이브러리
-Head "4/6  앱 라이브러리 (web 폴더)"
+Head "5/8  앱 라이브러리 (web 폴더)"
 if (Has "npm") {
   if (Test-Path (Join-Path $Root "web\node_modules")) {
     Write-Host "  이미 설치됨 (건너뜀)" -ForegroundColor Green
@@ -94,7 +133,7 @@ if (Has "npm") {
   } else {
     Write-Host "  설치 중... 용량이 커서 5~10분 걸릴 수 있습니다." -ForegroundColor Yellow
     Push-Location (Join-Path $Root "web")
-    cmd /c "npm install" 2>&1 | Select-Object -Last 3
+    cmd /c "npm ci" 2>&1 | Select-Object -Last 3
     Pop-Location
     if (Test-Path (Join-Path $Root "web\node_modules")) {
       Write-Host "  설치 완료" -ForegroundColor Green; $ok += "앱 라이브러리"
@@ -103,7 +142,7 @@ if (Has "npm") {
 } else { $fail += "앱 라이브러리 — Node.js 가 먼저 설치돼야 합니다." }
 
 # -------------------------------------------------- 5. 파이썬 라이브러리
-Head "5/6  검사 엔진 라이브러리 (파이썬)"
+Head "6/8  검사 엔진 라이브러리 (파이썬)"
 if ($py) {
   Write-Host "  설치 중... 몇 분 걸립니다." -ForegroundColor Yellow
   & $py -m pip install --upgrade pip --quiet 2>&1 | Out-Null
@@ -117,15 +156,34 @@ if ($py) {
   }
 } else { $fail += "파이썬 라이브러리 — Python 이 먼저 설치돼야 합니다." }
 
-# ------------------------------------------------------------- 6. 마무리 설정
-Head "6/6  마무리"
+# ------------------------------------------------------------- 7. 저장소 연결
+Head "7/8  회사 저장소와 자동 배포 확인"
 if (Has "git") {
-  cmd /c "git config core.hooksPath hooks" 2>&1 | Out-Null
+  git config core.hooksPath hooks
+  git remote set-url origin https://github.com/isenswonju/print-compare.git 2>$null
+  git config user.name isenswonju
+  git config user.email isenswonju@gmail.com
   Write-Host "  저장 전 자동 검사를 켰습니다." -ForegroundColor Green
   $ok += "저장 전 자동 검사"
 } else {
   $warn += "Git 이 없습니다 — 되돌리기와 저장 이력 기능을 쓰려면 https://git-scm.com 에서 설치하세요."
 }
+if (Has "gh") {
+  gh repo view isenswonju/print-compare --json nameWithOwner 2>$null | Out-Null
+  if ($LASTEXITCODE -eq 0) { $ok += "회사 GitHub 저장소 접근" }
+  else { $fail += "GitHub 저장소 접근 — 회사 계정에 isenswonju/print-compare 권한이 필요합니다." }
+  $secrets = gh secret list --repo isenswonju/print-compare 2>$null
+  if ($secrets -match "(?m)^HF_TOKEN\s" -and
+      $secrets -match "(?m)^VERCEL_TOKEN\s") { $ok += "자동 배포 토큰(Hugging Face·Vercel)" }
+  else { $fail += "자동 배포 토큰 — GitHub Actions secrets에 HF_TOKEN과 VERCEL_TOKEN이 모두 필요합니다." }
+}
+
+# ------------------------------------------------------------- 8. 마무리 확인
+Head "8/8  실행 준비 확인"
+if ((Test-Path (Join-Path $Root "AGENTS.md")) -and
+    (Test-Path (Join-Path $Root ".github\workflows\verify-and-deploy.yml"))) {
+  $ok += "프로젝트 규칙과 자동 배포 워크플로우"
+} else { $fail += "프로젝트 파일이 빠졌습니다 — 압축을 다시 받아 푸세요." }
 if (-not (Has "tesseract")) {
   $warn += "글자 인식(OCR) 프로그램이 없습니다. 앱 사용에는 지장이 없고, 파이썬 쪽 전체 정확도 검사에만 필요합니다. 필요해지면 Codex 에게 'tesseract 설치 방법 알려줘' 라고 물어보세요."
 }
@@ -143,12 +201,10 @@ Write-Host ""
 if ($fail.Count -eq 0) {
   Write-Host "  세팅이 끝났습니다." -ForegroundColor Green
   Write-Host ""
-  Write-Host "  다음 순서로 하세요:" -ForegroundColor White
-  Write-Host "   1) 이 창에 다음을 치고 엔터  ->  codex login"
-  Write-Host "      (브라우저가 열리면 ChatGPT 계정으로 로그인. 한 번만 하면 됩니다)"
-  Write-Host "   2) 앞으로는 '시작.bat' 을 더블클릭하면 바로 대화창이 열립니다."
-  Write-Host "   3) 인수인계서(사용법)는 아래 주소에 있습니다:"
-  Write-Host "      https://i-sens-artwork-compare.static.hf.space/handover.html" -ForegroundColor Cyan
+  Write-Host "  인수인계 세팅이 모두 끝났습니다." -ForegroundColor White
+  Write-Host "   앞으로는 '시작.bat'만 더블클릭하면 됩니다."
+  Write-Host "   인수인계서(사용법)는 아래 주소에 있습니다:"
+  Write-Host "      https://isenswonju-print-compare.static.hf.space/handover.html" -ForegroundColor Cyan
 } else {
   Write-Host "  [필요] 항목을 처리한 뒤 '설치.bat' 을 다시 실행하세요." -ForegroundColor Yellow
 }

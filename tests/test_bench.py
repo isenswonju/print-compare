@@ -436,7 +436,7 @@ def feedback_payload(**over):
     }
     item.update(over)
     return {"received": "2026-07-30T20:00:00",
-            "data": {"app": "artwork-compare-web", "items": [item]}}
+            "data": {"app": "print-compare", "items": [item]}}
 
 
 @pytest.fixture

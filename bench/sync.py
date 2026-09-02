@@ -1,4 +1,4 @@
-"""매일 도는 정확도 점검 — launchd(`com.artwork-compare.bench-sync`)가 실행한다.
+"""필요할 때 수동으로 실행하는 정확도·서비스 종합 점검.
 
   0) 배포 지문 대조(배포 누락 감지) + 피드백 수집 경로 건강검진
   1) 공용 보관함에 새로 올라온 아트웍을 감시 케이스로 들여온다
@@ -60,7 +60,7 @@ def case_files() -> set[str]:
     return {p.name for p in CASE_DIR.glob("*.json")}
 
 
-SPACE_URL = "https://i-sens-artwork-compare.static.hf.space"
+SPACE_URL = "https://isenswonju-print-compare.static.hf.space"
 
 
 def check_deploy() -> bool:
@@ -110,14 +110,14 @@ def check_deploy() -> bool:
     return True
 
 
-COLLECT_URL = "https://inkspect-feedback.vercel.app/api/feedback"
+COLLECT_URL = "https://print-compare-feedback.vercel.app/api/feedback"
 LOCAL_HEALTHZ = "http://127.0.0.1:8501/healthz"
 
 
 def check_feedback_health(net_ok: bool) -> None:
     """피드백 수집 경로 건강검진 — "살아 있는데 저장이 안 되는" 상태를 잡는다.
 
-    주경로(브라우저 → Vercel inkspect-feedback)와 폴백(사내망 Flask /feedback)
+    주경로(브라우저 → Vercel print-compare-feedback)와 폴백(사내망 Flask /feedback)
     을 모두 본다. 프로세스 죽음은 launchd KeepAlive 가 복구하므로, 여기서 잡는
     것은 그 너머다: Vercel 장애, launchd 에이전트 언로드, 디스크/권한 문제.
     """
@@ -157,7 +157,7 @@ def check_feedback_health(net_ok: bool) -> None:
         log(f"로컬 서버 접속 실패: {e}")
         notify("인쇄 검수 서버 ⚠️",
                "webapp.py(8501) 가 응답하지 않습니다 — "
-               "launchctl 로 com.artwork-compare.server 를 확인하세요.")
+               "launchctl 로 com.print-compare.server 를 확인하세요.")
 
 
 def check_engine_parity() -> None:

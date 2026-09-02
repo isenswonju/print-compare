@@ -1,23 +1,27 @@
 인쇄 검수 도구 — 시작하기
 =========================
 
-1) 이 폴더를 경로에 한글/띄어쓰기가 없는 곳에 두세요.
-   예)  C:\inkspect
+받는 사람이 할 일은 아래 세 단계뿐입니다.
+
+1) 이 압축을 경로에 한글/띄어쓰기가 없는 곳에 푸세요.
+   예)  C:\print-compare
 
 2) "설치.bat" 을 더블클릭하세요.
    필요한 프로그램을 알아서 설치합니다. 처음에는 10~20분 걸립니다.
    파란 경고 창이 뜨면 [추가 정보] → [실행] 을 누르세요.
 
-3) 설치가 끝난 창에 아래를 치고 엔터를 누르세요. (한 번만)
+3) 설치 중 GitHub와 Codex 브라우저 로그인 창이 열리면 로그인만 승인하세요.
+   Codex는 담당자 각자의 개인 ChatGPT 계정으로 로그인해도 됩니다. 프로젝트 규칙은
+   이 폴더의 AGENTS.md에 있고, 배포 토큰은 GitHub Secret에 있으므로 Codex 계정이
+   바뀌어도 유지보수 절차와 배포 결과는 달라지지 않습니다.
 
-       codex login
-
-4) 앞으로는 "시작.bat" 을 더블클릭하면 대화창이 열립니다.
+설치 결과가 모두 [완료]이면 인수인계가 끝난 것입니다. 앞으로는 "시작.bat"만
+더블클릭하면 됩니다. 실수로 설치 전에 시작을 눌러도 설치가 자동으로 열립니다.
 
 
 전체 사용 안내서
 ----------------
-https://i-sens-artwork-compare.static.hf.space/handover.html
+https://isenswonju-print-compare.static.hf.space/handover.html
 
 설치·사용법, 유지보수하는 법, 문제가 생겼을 때의 조치가 모두 들어 있습니다.
 먼저 한 번 읽어보시길 권합니다.
@@ -25,4 +29,14 @@ https://i-sens-artwork-compare.static.hf.space/handover.html
 
 아이디와 비밀번호
 -----------------
-별도의 "계정 시트" 로 따로 전달됩니다. 이 폴더에는 들어 있지 않습니다.
+Hugging Face 계정: isenswonju@gmail.com
+Vercel 팀: i-sens (로그인 계정: isenswonju@gmail.com)
+GitHub 저장소: https://github.com/isenswonju/print-compare
+
+비밀번호는 회사 비밀번호 관리자 또는 별도의 계정 시트로 전달합니다.
+이 파일이나 Git 저장소에는 비밀번호와 토큰을 적지 않습니다.
+
+자동 배포용 Hugging Face 토큰은 GitHub 저장소
+isenswonju/print-compare의 Settings → Secrets and variables → Actions에서
+HF_TOKEN이라는 이름으로 보관합니다. 인수인계받은 사람은 Secret 값을 읽을 수
+없으므로, 담당자가 바뀌면 새 토큰을 발급해 HF_TOKEN을 교체합니다.

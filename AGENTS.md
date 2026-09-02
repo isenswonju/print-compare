@@ -14,7 +14,9 @@ Codex/Claude Code 등 AI 코딩 도구는 이 파일을 먼저 읽는다.
 
 ## 절대 규칙 (어기면 사고가 난다 — 과거 실제 사고 기록)
 
-1. **엔진을 고쳤으면 반드시 재배포한다.** `python3 tools/hf_deploy.py`
+1. **엔진을 고쳤으면 반드시 재배포한다.** 검증 후 `main`에 커밋·push하면
+   GitHub Actions가 자동 배포한다. Actions의 `실서비스 배포 및 확인` 성공까지
+   확인한다. 자동 배포를 쓸 수 없을 때만 `python3 tools/hf_deploy.py`를 실행한다.
    빠뜨리면 사용자는 계속 옛 엔진을 쓴다(2026-08-05, 구엔진 오탐 45건 재판정).
 2. **IndexedDB 버전을 올리지 않는다.** 스토어를 추가하지 말고 기존 스토어의
    키를 쓴다. 버전 업그레이드는 다른 탭에 막혀 앱이 영구 정지한다(2026-08-31).
@@ -36,7 +38,8 @@ python -m pytest tests/ -v                    # 1. 회귀 테스트 (~13초)
 python -m bench.run --fast --group guard      # 2. 오탐 감시 (~30초)
 python -m bench.run                           # 3. 엔진을 고쳤다면 전체 (~6.5분)
 cd web && npm test                            # 4. web/ 를 고쳤다면
-python3 tools/hf_deploy.py                    # 5. 엔진/web 변경이면 배포
+# 5. 엔진/web 변경이면 main에 push → Actions의 배포 성공 확인
+#    (자동 배포 불가 시에만 python3 tools/hf_deploy.py)
 ```
 
 `bench`가 FAIL이면 `bench/out/report.md`에 무엇이 깨졌는지와 판정용 크롭이 있다.
@@ -63,7 +66,8 @@ python tools/feedback_status.py --done <id> …   # 반영을 마쳤으면 확�
 2. 지적 내용(`cause`, `comment`)을 읽고 원인을 조사한다.
 3. 필요하면 `python -m bench.import_feedback` 로 케이스를 만들어 계약으로 굳힌다.
 4. 엔진을 고치고 위의 검증 절차를 통과시킨다.
-5. 배포한다(`tools/hf_deploy.py`).
+5. `main`에 커밋·push하고 GitHub Actions의 자동 배포 성공을 확인한다
+   (자동 배포 불가 시에만 `tools/hf_deploy.py`).
 6. **`--done <id>` 로 상태를 찍는다.** 여기까지가 한 세트다.
 
 고치지 않기로 판단한 건(구조적 한계 등)도 `--done` 으로 닫되, 왜 닫는지를

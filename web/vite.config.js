@@ -32,7 +32,7 @@ function pipelineHash() {
   return h.digest("hex").slice(0, 12);
 }
 
-// 빌드마다 dist/version.json 을 남긴다. bench.sync 가 배포된 Space 의 이 파일을
+// 빌드마다 dist/version.json 을 남긴다. 배포 도구가 Space 의 이 파일을
 // 읽어 로컬 엔진과 대조한다 — "엔진은 고쳤는데 재배포를 빠뜨림"(2026-08-05,
 // 구엔진 오탐 45건 재판정)을 매일 자동으로 잡기 위한 장치다.
 function versionStamp() {

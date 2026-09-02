@@ -35,7 +35,7 @@ def client(tmp_path, monkeypatch):
 def test_feedback_saves_jsonl_and_separates_image(client):
     c, fb_dir = client
     payload = {
-        "app": "artwork-compare-web",
+        "app": "print-compare",
         "items": [{
             "set": "세트1",
             "refImage": _png_data_url(),

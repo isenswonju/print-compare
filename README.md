@@ -5,15 +5,14 @@
 
 **주 사용 형태는 브라우저판(`web/`)이다** — 분석 전체가 접속자 브라우저(wasm)
 안에서 실행되는 정적 SPA. 배포:
-- 상시(무료): https://i-sens-artwork-compare.static.hf.space/
+- 상시(무료): https://isenswonju-print-compare.static.hf.space/
 - 사내망: http://<맥미니 IP>:8501/app/ (launchd 상주 `webapp.py`가 서빙)
 
 구성 요소:
 - `web/` — 브라우저판 (React+TS, opencv.js/tesseract.js). 재배포:
   `python3 tools/hf_deploy.py` (빌드→업로드→실서비스 지문 검증까지 한 명령).
-  엔진 수정은 재배포까지가 한 세트다 — 빠뜨리면 매일 03:10 `bench.sync`가
-  배포 지문(`version.json`) 불일치 알림으로 잡는다.
-  원본 보관함은 **팀 공용 하나**다 — 서버(`inkspect-feedback`의 `/api/library`)가
+  엔진 수정은 재배포까지가 한 세트이며 GitHub Actions가 누락 없이 처리한다.
+  원본 보관함은 **팀 공용 하나**다 — 서버(`print-compare-feedback`의 `/api/library`)가
   정본이고 IndexedDB는 LRU 캐시(목록만 자동 동기화, 본체는 사용 시 다운로드,
   삭제도 tombstone으로 전파). 비밀번호·로그인 없이 어느 기기에서 열든 같은
   보관함이 보인다. 자세한 구조는 `docs/원본보관함-영구저장-계획.md` §4-3,
@@ -26,6 +25,30 @@
 - `webapp.py` — 경량 지원 서버: `/app/` 정적 서빙 + `/feedback` 피드백 수집
   (`feedback/feedback.jsonl` + `feedback/images/` — 오탐 튜닝 입력 데이터).
   옛 서버측 분석 웹 UI는 2026-07-24 제거됨.
+
+### 자동 배포 (운영자용)
+
+`main` 브랜치에 변경을 반영하면 GitHub Actions가 회귀 테스트, 오탐 감시,
+전체 정확도 검사, 웹 테스트를 순서대로 실행한다. 전부 통과한 경우에만 Hugging
+Face 실서비스로 자동 배포하고, 배포된 엔진 지문까지 확인한다. Pull Request는
+검증만 하고 배포하지 않는다. 기준선 승인(`bench --accept`)은 자동화하지 않는다.
+
+저장소 관리자가 최초 한 번만 다음 설정을 하면 된다.
+
+1. Hugging Face에서 `print-compare` Space에 쓸 수 있는 토큰을 만든다.
+2. GitHub 저장소의 **Settings → Secrets and variables → Actions → New repository
+   secret**에서 이름 `HF_TOKEN`, 값은 위 토큰으로 저장한다.
+
+이후 운영자는 `main`에 변경을 반영하기만 하면 된다. 진행 상태와 실패 이유는
+GitHub 저장소의 **Actions → 검증 후 자동 배포**에서 확인한다. 실패하면 배포는
+자동으로 중단되며 기존 서비스는 그대로 유지된다. 필요하면 해당 화면의
+**Run workflow**로 같은 커밋을 다시 검증·배포할 수 있다.
+
+### Vercel 소유권 이전
+
+피드백과 원본 보관함은 회사 Vercel 팀 `i-sens`의 `print-compare-feedback`이
+담당한다. 기존 데이터 35개는 2026-09-02 새 Blob Store로 복사 후 경로·크기까지
+검증했다. 서비스 주소는 `https://print-compare-feedback.vercel.app`이다.
 
 입력 형식: PNG · JPG · **PDF**. PDF는 첫 페이지를 600dpi 흰 배경 PNG로
 래스터화한 뒤 분석한다(브라우저판은 self-host pdf.js, Python판은 pypdfium2 —
@@ -74,9 +97,9 @@ python3 webapp.py --host 0.0.0.0   # → http://<내IP>:8501/app/
 **고정 공유 주소: https://macmini.tail5860bc.ts.net/** (재부팅해도 불변)
 
 구성 (모두 로그인 시 자동 시작, 수동 개입 불필요):
-- 웹서버: launchd(`~/Library/LaunchAgents/com.artwork-compare.server.plist`)가
+- 웹서버: launchd(`~/Library/LaunchAgents/com.print-compare.server.plist`)가
   `start_server.sh` 실행. 수동 재시작:
-  `launchctl kickstart -k gui/501/com.artwork-compare.server`
+  `launchctl kickstart -k gui/501/com.print-compare.server`
 - 외부 공개: Tailscale Funnel (계정 isenswonju@, 로그인 항목에 등록됨).
   상태 확인: `/Applications/Tailscale.app/Contents/MacOS/Tailscale funnel status`
 - 기본은 접속 암호 없음 — URL 아는 사람은 누구나 사용 가능하니 사내에만
@@ -286,37 +309,11 @@ git config core.hooksPath hooks      # 클론당 1회
 전체 게이트(라벨 계약·미검출·마진)는 6.5분이라 커밋마다 돌리지 않는다 —
 배포 전이나 엔진을 손본 뒤 `python -m bench.run`으로 따로 돌린다.
 
-### 매일 자동 점검 (launchd)
+### 변경할 때 자동 검사 (GitHub Actions)
 
-맥미니에서 **매일 03:10** 에 `bench/sync.py` 가 돈다.
-
-0. HF 배포 지문 대조(배포 누락 감지) + 피드백 수집 경로 건강검진
-   (Vercel 수집기 도달성, 로컬 `/healthz` — feedback/ 실제 쓰기 검사)
-1. 공용 보관함에 새로 올라온 아트웍을 감시 케이스로 들여오고
-2. 전 케이스를 python 엔진으로 점검하고
-3. 실물(labeled) 케이스에서 python↔web 엔진의 계약 판정이 갈리는지 대조하고
-   (사용자가 실제로 보는 것은 web 엔진이다 — 예산 내 오탐 수 요동은 로그만)
-4. 게이트가 깨졌으면 자가수리를 시도한다 — `tools/self_repair.py` 가 격리
-   worktree 에서 Claude Code 헤드리스로 원인을 고쳐 **repair/\* 브랜치**에
-   패치를 제안한다(옵트인: `private/.self-repair-on`). push · `--accept` ·
-   배포는 하지 않는다 — 검토와 병합은 사람 몫이다.
-
-문제가 있을 때만(새 케이스·게이트 파손·배포 불일치·패리티 어긋남·수리 결과)
-알림을 띄운다.
-
-```bash
-cp tools/com.artwork-compare.bench-sync.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.artwork-compare.bench-sync.plist
-launchctl kickstart -k gui/$(id -u)/com.artwork-compare.bench-sync   # 즉시 한 번
-launchctl bootout   gui/$(id -u)/com.artwork-compare.bench-sync      # 끄기
-```
-
-기록은 `bench/out/sync.log`(생성물). **기준선은 자동 승인하지 않는다** — 자동
-갱신하면 안전망이 그냥 로그가 되기 때문에, 사람이 결과를 보고 `--accept` 해야
-한다. 이력(`history.jsonl`)도 남기지 않아 저장소가 매일 더러워지지 않는다.
-새로 생긴 케이스 JSON만 작업 트리에 남는다(검토 후 커밋할 물건).
-실행 시간 경고도 끈다(`--no-timing`) — launchd 는 우선순위가 달라 늘 1.6배쯤
-느려서, 켜두면 경고 32건이 진짜 신호를 덮는다.
+매일 도는 맥미니 예약 점검은 사용하지 않는다. `main`에 변경이 올라올 때만
+GitHub Actions가 회귀 테스트·오탐 감시·전체 정확도 검사·웹 테스트를 실행하고,
+전부 통과하면 배포한다. 기준선은 자동 승인하지 않는다.
 
 피드백·보관함 API 는 인증이 없다(2026-09-02, 조회·상태 변경·삭제 모두).
 처리 상태 동기화는 `tools/feedback_status.py` 를 쓴다.

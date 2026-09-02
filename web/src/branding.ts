@@ -31,8 +31,8 @@ export const branding: Branding = {
     { text: "-SENS", color: "#171c8f" },
   ],
   feedback: {
-    collectUrl: "https://inkspect-feedback.vercel.app/api/feedback",
-    adminUrl: "https://inkspect-feedback.vercel.app/api/admin",
+    collectUrl: "https://print-compare-feedback.vercel.app/api/feedback",
+    adminUrl: "https://print-compare-feedback.vercel.app/api/admin",
   },
-  libraryUrl: "https://inkspect-feedback.vercel.app/api/library",
+  libraryUrl: "https://print-compare-feedback.vercel.app/api/library",
 };

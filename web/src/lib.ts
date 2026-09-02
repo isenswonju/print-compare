@@ -355,7 +355,7 @@ export async function buildFeedbackPayload(
       refImage, testImage,
     });
   }
-  return { app: "artwork-compare-web", version: APP_VERSION,
+  return { app: "print-compare", version: APP_VERSION,
            sentAt: new Date().toISOString(), origin: location.origin, items };
 }
 
@@ -411,7 +411,7 @@ export function buildErrorReport(
   const meta = (f?: File) =>
     f ? { name: f.name, size: f.size, type: f.type } : undefined;
   return {
-    app: "artwork-compare-web",
+    app: "print-compare",
     version: APP_VERSION,
     sentAt: new Date().toISOString(),
     origin: location.origin,

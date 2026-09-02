@@ -32,7 +32,7 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 피드백에 원본 이미지 포함
 
 FEEDBACK_ALLOWED_ORIGINS = {
-    "https://i-sens-artwork-compare.static.hf.space",
+    "https://isenswonju-print-compare.static.hf.space",
 }
 
 
@@ -43,7 +43,7 @@ def index():
 
 @app.get("/healthz")
 def healthz():
-    """건강검진 — bench.sync 가 매일 호출한다.
+    """건강검진 — 필요할 때 상태 확인에 사용한다.
 
     프로세스 생존은 launchd KeepAlive 가 지키므로, 여기서는 "살아 있는데
     일을 못 하는" 상태를 검사한다: 피드백 디렉터리 쓰기 가능 여부와 디스크

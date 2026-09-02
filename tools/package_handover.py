@@ -5,7 +5,7 @@
     python3 tools/package_handover.py --no-private    # 실물 라벨 이미지 제외
 
 다시 만들어지는 것(node_modules·빌드 산출물·작업 캐시)은 빼고, 되돌리기에
-필요한 이력(.git)은 넣는다. 계정 시트는 항상 제외한다 — 별도 경로로 전달할 것.
+필요한 이력(.git)은 넣는다. 바탕화면의 계정 시트가 있으면 압축 루트에 함께 넣는다.
 """
 from __future__ import annotations
 
@@ -23,12 +23,14 @@ SKIP_DIRS = {
     "web/node_modules", "node_modules", "web/dist", "dist",
     "bench/work", "bench/out", "web/coverage", "coverage",
     ".pytest_cache", "webjobs", "라벨 AI 테스트",
+    "backend/node_modules", "backend/.vercel", "inkspect-feedback",
 }
 # 이름만 보고 제외
 SKIP_NAMES = {".DS_Store"}
 SKIP_SUFFIX = {".pyc", ".log"}
 # 절대 넣지 않는 파일 — 비밀번호가 들어가는 곳
 NEVER = {"private/인수인계-계정.md", "private/.library-password"}
+ACCOUNT_SHEET = ROOT.parent / "인수인계-계정.txt"
 
 
 def skipped(rel: str) -> bool:
@@ -86,17 +88,21 @@ def main(argv: list[str] | None = None) -> int:
             z.write(f, f.relative_to(ROOT).as_posix())
             if i % 2000 == 0:
                 print(f"   … {i:,}/{len(files):,}")
+        if ACCOUNT_SHEET.exists():
+            z.write(ACCOUNT_SHEET, "인수인계-계정.txt")
 
     size = dest.stat().st_size
     print(f"\n✅ 완료 — {dest.name}  ({size / 1e6:,.0f}MB)")
 
     print("\n받는 쪽 안내:")
-    print("  1) 경로에 한글·띄어쓰기 없는 폴더에 압축을 푼다 (예: C:\\inkspect)")
-    print("  2) 설치.bat 더블클릭 → 끝나면 codex login")
-    print("  3) 이후에는 시작.bat 더블클릭")
+    print("  1) 경로에 한글·띄어쓰기 없는 폴더에 압축을 푼다 (예: C:\\print-compare)")
+    print("  2) 설치.bat 더블클릭 → 브라우저 로그인 창만 승인")
+    print("  3) 결과가 전부 [완료]이면 이후에는 시작.bat만 더블클릭")
 
-    print("\n따로 전달할 것:")
-    print("  · private/인수인계-계정.md (계정 시트) — 압축본에 넣지 않았다.")
+    if ACCOUNT_SHEET.exists():
+        print("\n계정 시트도 압축본 안에 넣었다.")
+    else:
+        print("\n⚠️  바탕화면의 인수인계-계정.txt를 찾지 못해 계정 시트는 빠졌다.")
     if include_private:
         print("\n⚠️  이 압축본에는 실물 라벨 이미지(의료기기 데이터)가 들어 있다.")
         print("    사내 전달 경로로만 보내고, 열린 공유 폴더에 두지 말 것.")

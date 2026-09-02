@@ -36,7 +36,7 @@ from .import_feedback import slug
 
 CASE_DIR = Path(__file__).parent / "cases"
 IMAGE_DIR = ROOT / "private" / "bench-cases"
-LIBRARY_URL = "https://inkspect-feedback.vercel.app/api/library"
+LIBRARY_URL = "https://print-compare-feedback.vercel.app/api/library"
 SUFFIXES = {".png", ".jpg", ".jpeg", ".pdf"}
 DEFAULT_RECIPES = ["combo"]
 

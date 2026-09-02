@@ -21,7 +21,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ADMIN_URL = "https://inkspect-feedback.vercel.app/api/admin"
+ADMIN_URL = "https://print-compare-feedback.vercel.app/api/admin"
 
 
 def call(body: dict, timeout: int = 20) -> dict:

@@ -1,0 +1,142 @@
+name: 검증 후 자동 배포
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 새 변경이 들어오면 아직 배포하지 않은 이전 실행은 중단한다.
+concurrency:
+  group: production-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: 정확도 및 웹 검사
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 소스 받기
+        uses: actions/checkout@v6
+
+      - name: Python 준비
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Node.js 준비
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: pnpm 준비
+        run: corepack enable
+
+      - name: 시스템 및 Python 의존성 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes tesseract-ocr
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+
+      - name: 웹 의존성 설치
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: Python 회귀 테스트
+        run: python -m pytest tests/ -v
+
+      - name: 오탐 감시
+        run: python -m bench.run --fast --group guard
+
+      - name: 전체 정확도 검사
+        run: python -m bench.run
+
+      - name: 웹 테스트
+        working-directory: web
+        run: pnpm test
+
+  deploy:
+    name: 실서비스 배포 및 확인
+    needs: verify
+    # PR은 검증만 한다. main에 실제 반영된 커밋만 배포한다.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 소스 받기
+        uses: actions/checkout@v6
+
+      - name: Python 준비
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Node.js 준비
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: pnpm 준비
+        run: corepack enable
+
+      - name: 배포 도구 설치
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          cd web
+          pnpm install --frozen-lockfile
+
+      - name: Hugging Face에 배포하고 실서비스 확인
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python tools/hf_deploy.py
+
+  deploy-backend:
+    name: 피드백·원본 보관함 서버 배포
+    needs: verify
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERCEL_ORG_ID: team_p449HUDMrTEbXR90JJqR6pVp
+      VERCEL_PROJECT_ID: prj_CFNZDMy3HB1ltJzv7gXzsdFJFGi5
+
+    steps:
+      - name: 소스 받기
+        uses: actions/checkout@v6
+
+      - name: Node.js 준비
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: 백엔드 의존성 설치
+        working-directory: backend
+        run: npm ci
+
+      - name: Vercel 회사 프로젝트 배포
+        working-directory: backend
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx --yes vercel@59.11.2 deploy --prod --yes --token "$VERCEL_TOKEN"
+
+      - name: 보관함·피드백 API 확인
+        shell: bash
+        run: |
+          test "$(curl -sS -o /tmp/library.json -w '%{http_code}' \
+            -H 'content-type: application/json' \
+            -d '{"action":"listfiles"}' \
+            https://print-compare-feedback.vercel.app/api/library)" = "200"
+          test "$(curl -sS -o /tmp/feedback.json -w '%{http_code}' \
+            -H 'content-type: application/json' -d '{}' \
+            https://print-compare-feedback.vercel.app/api/feedback)" = "400"

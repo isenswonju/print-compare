@@ -416,7 +416,7 @@
     <dl class="addr">
       <div>
         <dt>검수 앱 (현장 사용)</dt>
-        <dd><a href="/">i-sens-artwork-compare<br>.static.hf.space</a></dd>
+        <dd><a href="/">isenswonju-print-compare<br>.static.hf.space</a></dd>
       </div>
       <div>
         <dt>이 안내서</dt>
@@ -424,7 +424,7 @@
       </div>
       <div>
         <dt>피드백 · 원본 보관함</dt>
-        <dd>inkspect-feedback<br>.vercel.app</dd>
+        <dd>print-compare-feedback<br>.vercel.app</dd>
       </div>
       <div>
         <dt>사내망 (맥미니)</dt>
@@ -433,9 +433,8 @@
     </dl>
 
     <div class="note">
-      <b>맥미니는 켜 두어야 합니다.</b> 매일 새벽 자동 점검과 사내망 주소가 그
-      컴퓨터에서 돕니다. 다만 위의 검수 앱 주소는 맥미니와 무관하게 항상 열립니다 —
-      현장에서는 이 주소만 쓰면 됩니다.
+      <b>현장 검수와 자동 배포는 맥미니에 의존하지 않습니다.</b> 맥미니는 사내망
+      주소가 필요한 경우에만 켜 두면 됩니다. 현장에서는 위 검수 앱 주소만 쓰면 됩니다.
     </div>
   </section>
 
@@ -444,10 +443,11 @@
     <p class="lede">아이디·비밀번호는 별도 시트로 전달됩니다. 이 페이지에는 적지 않습니다.</p>
 
     <ul class="check">
-      <li><b>Hugging Face</b> <span>— 검수 앱이 배포되는 곳 (I-SENS/artwork-compare)</span></li>
-      <li><b>Vercel</b> <span>— 피드백과 원본 보관함 서버 (inkspect-feedback)</span></li>
+      <li><b>GitHub</b> <span>— 코드와 자동 배포 설정 (isenswonju/print-compare)</span></li>
+      <li><b>Hugging Face</b> <span>— 검수 앱이 배포되는 곳 (print-compare)</span></li>
+      <li><b>Vercel</b> <span>— 피드백과 원본 보관함 서버 (i-sens 팀)</span></li>
       <li><b>Tailscale</b> <span>— 사내망 주소를 여는 프로그램 (맥미니)</span></li>
-      <li><b>맥미니 로그인</b> <span>— 매일 자동 점검이 도는 컴퓨터</span></li>
+      <li><b>맥미니 로그인</b> <span>— 사내망 주소가 필요할 때만 사용</span></li>
       <li><b>ChatGPT</b> <span>— Codex 로그인에 사용</span></li>
     </ul>
 
@@ -469,7 +469,7 @@
         <h3>압축 풀기</h3>
         <p>
           전달받은 압축 파일을 <b>경로에 한글이나 띄어쓰기가 없는 폴더</b>에 푸세요.
-          예: <code>C:\inkspect</code>
+          예: <code>C:\print-compare</code>
         </p>
         <p>
           바탕화면이나 <code>다운로드</code> 폴더에 그냥 풀면 일부 도구가 경로를 못
@@ -502,6 +502,17 @@
           <div class="cap">브라우저가 열리면 ChatGPT 계정으로 로그인</div>
           <pre>codex login</pre>
         </div>
+        <p>담당자 각자의 개인 ChatGPT/Codex 계정을 사용해도 됩니다. 프로젝트 규칙은
+          저장소의 <code>AGENTS.md</code>, 배포 권한은 GitHub Actions Secret에 있으므로
+          Codex 계정이 바뀌어도 유지보수 절차와 배포 결과는 달라지지 않습니다.</p>
+      </li>
+
+      <li>
+        <h3>GitHub 로그인</h3>
+        <p><a href="https://github.com/login">github.com/login</a>을 열어 회사 계정으로 로그인한 뒤
+          <code>isenswonju/print-compare</code> 저장소가 보이는지 확인하세요.</p>
+        <p>처음 Git 작업에서 인증 창이 뜨면 <b>브라우저로 로그인</b>을 선택합니다.
+          GitHub 비밀번호를 명령창에 직접 입력하지 않습니다.</p>
       </li>
 
       <li>
@@ -546,9 +557,9 @@
       <div class="rule">
         <div class="k">3</div>
         <div class="t">
-          <b>화면에 보이는 것을 바꿨으면 "배포까지" 말합니다</b>
-          고치기만 하면 이 컴퓨터에만 반영됩니다. 현장에서 보려면 배포해야 합니다.
-          <i>"배포까지 해줘."</i> 한 마디면 됩니다.
+          <b>배포는 자동입니다</b>
+          변경이 회사 GitHub의 <code>main</code>에 반영되면 검사를 모두 통과한 뒤
+          현장 앱까지 자동 배포됩니다. 운영자가 별도 배포 명령을 외울 필요가 없습니다.
         </div>
       </div>
     </div>
@@ -574,15 +585,11 @@
           </tr>
           <tr>
             <td>화면 문구·버튼을 바꾸고 싶다</td>
-            <td><span class="say">앱 화면의 '○○○' 문구를 '×××'로 바꿔줘. 바꾼 뒤 web 테스트를 돌리고 배포까지 해줘.</span></td>
+            <td><span class="say">앱 화면의 '○○○' 문구를 '×××'로 바꿔줘.</span></td>
           </tr>
           <tr>
             <td>고친 걸 현장에 반영하고 싶다</td>
-            <td><span class="say">지금 코드를 실서비스에 배포해줘. 배포 후 지문 검증까지 확인하고 알려줘.</span></td>
-          </tr>
-          <tr>
-            <td>밤새 자동 점검 결과가 궁금하다</td>
-            <td><span class="say">어젯밤 자동 점검(bench sync) 결과를 확인하고, 문제가 있으면 무엇이 문제인지 쉽게 설명해줘.</span></td>
+            <td><span class="say">GitHub Actions의 최근 자동 배포가 성공했는지 확인해줘.</span></td>
           </tr>
           <tr>
             <td>지금 상태가 정상인지 보고 싶다</td>
@@ -658,7 +665,7 @@
           <tr><th>언제</th><th>무엇이 일어나나</th></tr>
         </thead>
         <tbody>
-          <tr><td>매일 새벽 3:10</td><td>맥미니가 전체 정확도 검사를 돌리고, 배포된 앱이 최신인지 대조하고, 새로 올라온 원본 아트웍을 감시 목록에 추가합니다.</td></tr>
+          <tr><td>GitHub에 변경을 올릴 때</td><td>전체 안전 검사를 통과한 변경만 현장 앱에 자동 배포됩니다.</td></tr>
           <tr><td>코드를 저장할 때마다</td><td>검사 엔진을 건드린 변경이면 오탐 감시 검사가 30초간 자동으로 돕니다. 깨지면 저장이 막힙니다.</td></tr>
           <tr><td>사용자가 피드백을 남길 때</td><td>'미확인' 표시가 서버에 쌓입니다. 정확도를 개선하는 유일한 근거 데이터입니다.</td></tr>
           <tr><td>맥미니 재부팅</td><td>사내망 서버와 공유 주소가 자동으로 다시 켜집니다.</td></tr>
@@ -728,7 +735,7 @@
     <p>
       <b>NAS 는 보관용으로만 쓰세요.</b> NAS 폴더에서 직접 작업하면 빌드가 몇 배로
       느려지고, 파일 변경 감지와 저장 이력 기능이 자주 깨집니다. 작업은 항상
-      컴퓨터 내장 디스크(<code>C:\inkspect</code> 같은 곳)에서 하고, 주기적으로
+      컴퓨터 내장 디스크(<code>C:\print-compare</code> 같은 곳)에서 하고, 주기적으로
       폴더째 압축해 NAS 에 올려 두는 방식이 안전합니다.
     </p>
 

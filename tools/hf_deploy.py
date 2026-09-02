@@ -9,7 +9,7 @@
     python3 tools/hf_deploy.py --no-build  # 이미 빌드된 dist 를 업로드
     python3 tools/hf_deploy.py --dry-run   # 업로드 없이 빌드·지문만 확인
 
-매일 03:10 bench.sync 가 같은 지문을 대조해 배포 누락을 알림으로 잡는다.
+배포 직후 같은 지문을 대조해 배포 누락을 즉시 잡는다.
 """
 from __future__ import annotations
 
@@ -27,8 +27,8 @@ from bench.engines import git_state, pipeline_hash  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "web" / "dist"
-REPO_ID = "I-SENS/artwork-compare"
-SPACE_URL = "https://i-sens-artwork-compare.static.hf.space"
+REPO_ID = "isenswonju/print-compare"
+SPACE_URL = "https://isenswonju-print-compare.static.hf.space"
 VERIFY_TRIES = 10          # CDN 전파를 기다리는 재시도 횟수
 VERIFY_WAIT_S = 20
 
@@ -66,11 +66,14 @@ def check_local_stamp() -> dict:
 
 
 def upload(stamp: dict) -> None:
-    from huggingface_hub import upload_folder
+    from huggingface_hub import create_repo, upload_folder
     gs = git_state()
     msg = (f"deploy {gs['commit']}{'+dirty' if gs['dirty'] else ''} "
            f"pipeline={stamp['pipeline_hash']}")
     print(f"· upload_folder → {REPO_ID} ({msg})")
+    # 최초 배포에서도 비개발자가 Space를 따로 만들 필요가 없게 한다.
+    create_repo(repo_id=REPO_ID, repo_type="space", space_sdk="static",
+                exist_ok=True)
     # delete_patterns: 해시 파일명이 매번 바뀌어 옛 번들이 무한히 쌓인다 — 청소.
     upload_folder(repo_id=REPO_ID, repo_type="space", folder_path=str(DIST),
                   commit_message=msg, delete_patterns=["assets/**"])
@@ -90,7 +93,7 @@ def verify(stamp: dict) -> None:
               f"({i + 1}/{VERIFY_TRIES})")
         time.sleep(VERIFY_WAIT_S)
     raise SystemExit(f"❌ 업로드는 됐지만 {SPACE_URL} 이 아직 새 지문({want})을 "
-                     f"내놓지 않는다. 잠시 후 bench.sync 가 다시 대조하니 "
+                     f"내놓지 않는다. 잠시 후 다시 실행하거나 "
                      f"수동으로 {SPACE_URL}/version.json 을 확인할 것.")
 
 

@@ -172,7 +172,7 @@ describe("sevCounts", () => {
 
 describe("computeFeedbackEndpoints", () => {
   it("hf.space 호스트는 수집 서버 없음", () => {
-    expect(computeFeedbackEndpoints("i-sens-artwork-compare.static.hf.space"))
+    expect(computeFeedbackEndpoints("isenswonju-print-compare.static.hf.space"))
       .toEqual([]);
   });
   it("사내망 호스트는 /feedback", () => {
@@ -183,8 +183,8 @@ describe("computeFeedbackEndpoints", () => {
 
 describe("feedbackTargets", () => {
   it("수집기 URL이 있으면 호스트와 무관하게 그리로만 보낸다", () => {
-    const url = "https://inkspect-feedback.vercel.app/api/feedback";
-    expect(feedbackTargets(url, "i-sens-artwork-compare.static.hf.space"))
+    const url = "https://print-compare-feedback.vercel.app/api/feedback";
+    expect(feedbackTargets(url, "isenswonju-print-compare.static.hf.space"))
       .toEqual([url]);
     expect(feedbackTargets(url, "192.168.24.23")).toEqual([url]);
   });
@@ -276,7 +276,7 @@ describe("피드백 보류 큐", () => {
     expect(saveFbQueue(q)).toBe(true);
     expect(loadFbQueue()).toHaveLength(1);
     // setItem이 예외(용량 초과 등) → false
-    vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("quota"); });
     expect(saveFbQueue(q)).toBe(false);
   });
@@ -380,7 +380,7 @@ describe("buildFeedbackPayload — 건너뛰기(캔버스 불필요)", () => {
         fb: { defects: {}, missed: [] } },
     ]);
     expect(payload.items).toEqual([]);
-    expect(payload.app).toBe("artwork-compare-web");
+    expect(payload.app).toBe("print-compare");
     expect(typeof payload.sentAt).toBe("string");
   });
 });

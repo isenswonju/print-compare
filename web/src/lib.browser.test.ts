@@ -78,7 +78,7 @@ describe("buildFeedbackPayload — 서버 전송 페이로드 (실 브라우저)
       missed: [{ x: 40, y: 40, cause: "누락", comment: "여기 못잡음" }],
     };
     const payload = await buildFeedbackPayload([item]);
-    expect(payload.app).toBe("artwork-compare-web");
+    expect(payload.app).toBe("print-compare");
     expect(payload.items).toHaveLength(1);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const it0 = payload.items[0] as any;

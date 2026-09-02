@@ -41,13 +41,9 @@ let pairSeq = 0;
 export default function App() {
   const [view, setView] = useState<"upload" | "results" | "admin">("upload");
   // 관리자(피드백 조회) — 비번은 앱에 저장하지 않고 수집기 서버가 대조.
-  const [adminOpen, setAdminOpen] = useState(false);
-  const [adminPw, setAdminPw] = useState("");
-  const [adminErr, setAdminErr] = useState("");
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminData, setAdminData] =
     useState<{ count: number; items: AdminEntry[] } | null>(null);
-  const authedPwRef = useRef("");  // 로그인 후 목록 새로고침에 재사용(메모리만)
   // 피드백 페이지 — 확인 처리된 id, 날짜 그룹 접힘, 필터, 상태 메시지
   const [adminRead, setAdminRead] = useState<string[]>([]);
   const [adminClosed, setAdminClosed] = useState<Record<string, boolean>>({});
@@ -725,46 +721,40 @@ export default function App() {
     }
   }
 
-  // 관리자 조회 — 비번을 수집기 서버로 보내 대조한 뒤 목록을 받아온다.
-  async function submitAdmin(e?: React.FormEvent, pw?: string) {
+  // 피드백 조회 — 인증 없이 목록을 받아온다.
+  async function submitAdmin(e?: React.FormEvent) {
     e?.preventDefault();
     const adminUrl = branding.feedback?.adminUrl;
     if (!adminUrl) return;
-    // 로그인 시엔 입력값(adminPw), 목록 새로고침 시엔 인증된 비번(ref) 사용.
-    const password = pw ?? adminPw;
-    if (!password) return;
     setAdminBusy(true);
-    setAdminErr("");
+    setAdminMsg("");
     try {
       const r = await fetch(adminUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({}),
       });
-      if (r.status === 401) { setAdminErr("비밀번호가 올바르지 않습니다."); return; }
-      if (!r.ok) { setAdminErr(`오류: ${r.status}`); return; }
+      if (!r.ok) { setFbStatus(`피드백을 불러오지 못했습니다 (오류 ${r.status})`); return; }
       const data = await r.json();
-      authedPwRef.current = password;   // 세션 동안만 메모리에 보관(비저장)
       setAdminData(data);
       setAdminRead(Array.isArray(data.read) ? data.read : []);
-      setAdminOpen(false);
-      setAdminPw("");
       setView("admin");
     } catch {
-      setAdminErr("수집기에 연결할 수 없습니다.");
+      setFbStatus("수집기에 연결할 수 없습니다.");
     } finally {
       setAdminBusy(false);
     }
   }
 
-  // 피드백 관리 액션(확인 토글·삭제) — 로그인 때 쓴 비번을 그대로 재사용.
+  // 피드백 관리 액션(확인 토글·삭제). 인증 없이 동작한다 — 삭제는 화면에서
+  // 두 번 눌러 확정하는 단계가 실수를 막는다.
   async function adminPost(body: Record<string, unknown>) {
     const url = branding.feedback?.adminUrl;
-    if (!url || !authedPwRef.current) throw new Error("로그인이 필요합니다.");
+    if (!url) throw new Error("수집기 주소가 설정되지 않았습니다.");
     const r = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...body, password: authedPwRef.current }),
+      body: JSON.stringify(body),
     });
     if (!r.ok) throw new Error(`서버 오류: ${r.status}`);
     return r.json();
@@ -1114,34 +1104,15 @@ export default function App() {
           </span>
         )}
         {branding.feedback?.adminUrl && (
-          <button className="gnb-admin" title="관리자 — 피드백 조회"
-                  onClick={() => { setAdminErr(""); setAdminOpen(true); }}>🔒</button>
+          <button className="gnb-admin" title="피드백 조회"
+                  onClick={() => { setAdminMsg(""); submitAdmin(); }}
+                  disabled={adminBusy}>💬</button>
         )}
       </div>
     </nav>
   );
 
-  // 관리자 로그인 모달 — 비번은 상태에만, 앱 번들에 저장하지 않는다.
-  const adminModal = adminOpen && (
-    <div className="modal-back" onClick={() => setAdminOpen(false)}>
-      <form className="modal admin-modal" onClick={(e) => e.stopPropagation()}
-            onSubmit={submitAdmin}>
-        <h3>관리자 로그인</h3>
-        <p className="admin-hint">피드백 조회를 위해 비밀번호를 입력하세요.</p>
-        <input className="admin-pw" type="password" autoFocus
-               placeholder="비밀번호" value={adminPw}
-               onChange={(e) => setAdminPw(e.target.value)} />
-        {adminErr && <p className="admin-err">{adminErr}</p>}
-        <div className="modal-btns">
-          <span style={{ flex: 1 }} />
-          <button type="button" className="rm"
-                  onClick={() => setAdminOpen(false)}>취소</button>
-          <button type="submit" className="go save" disabled={adminBusy}>
-            {adminBusy ? "확인 중…" : "로그인"}</button>
-        </div>
-      </form>
-    </div>
-  );
+  const adminModal = null;   // 인증 없음 — 로그인 모달을 두지 않는다
 
   // 수집된 피드백 1건(제출 단위) 렌더 — 세트별 결함/누락과 크롭 이미지.
   // 머리글에 확인/미확인 스위치와 삭제(두 번 눌러 확정)를 둔다.
@@ -1285,7 +1256,7 @@ export default function App() {
                       onClick={() => setEntriesRead(unread.map((e) => e.id), true)}>
                 모두 확인 처리</button>
               <button className="rm"
-                      onClick={() => submitAdmin(undefined, authedPwRef.current)}
+                      onClick={() => submitAdmin()}
                       disabled={adminBusy}>새로고침</button>
               <button className="rm" onClick={() => setView("upload")}>닫기</button>
             </div>

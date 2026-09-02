@@ -15,7 +15,7 @@ export interface Branding {
   // 피드백 서버리스 수집기. 사내망·정적 배포 어디서든 여기로 수집되고,
   // adminUrl로 헤더 관리자 입구를 노출한다(비번은 수집기 서버 env).
   feedback?: { collectUrl?: string; adminUrl?: string };
-  // 공용 서버 보관함(안 A) 엔드포인트. 비번(ADMIN_PASSWORD) 게이트로 업로드
+  // 공용 서버 보관함(안 A) 엔드포인트. 인증 없이 업로드
   // 토큰을 발급하고 geturl로 최신 백업 URL을 돌려준다. 미설정이면 서버 동기화
   // 버튼을 숨긴다(로컬 백업/복원은 항상 가능).
   libraryUrl?: string;

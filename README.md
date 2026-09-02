@@ -318,8 +318,8 @@ launchctl bootout   gui/$(id -u)/com.artwork-compare.bench-sync      # 끄기
 실행 시간 경고도 끈다(`--no-timing`) — launchd 는 우선순위가 달라 늘 1.6배쯤
 느려서, 켜두면 경고 32건이 진짜 신호를 덮는다.
 
-보관함 비밀번호는 `private/.library-password`(git 제외)에서 읽는다. 파일이 없으면
-수입만 건너뛰고 점검은 그대로 돈다.
+피드백·보관함 API 는 인증이 없다(2026-09-02, 조회·상태 변경·삭제 모두).
+처리 상태 동기화는 `tools/feedback_status.py` 를 쓴다.
 
 > launchd 작업은 `~/Desktop` 접근이 macOS TCC 로 막혀 있다 — `/bin/sh` 로 스크립트를
 > 실행하면 `Operation not permitted` 로 죽는다. 그래서 서버 에이전트와 같은
@@ -408,7 +408,7 @@ inject-erase_line  면적 4044 / 최소 40px → 101×    ← 안전
 
 ```bash
 python -m bench.import_library --dir ~/원본모음   # 로컬 폴더에서
-python -m bench.import_library --server           # 공용 보관함(ADMIN_PASSWORD)
+python -m bench.import_library --server           # 공용 보관함(인증 없음)
 ```
 
 원본 하나 → `identity`(자기비교) + `benign`(스캔 스큐+질감 열화) 두 케이스.

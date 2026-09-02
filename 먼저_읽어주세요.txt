@@ -21,6 +21,8 @@
 
 전체 사용 안내서
 ----------------
+이 폴더의 "인수인계.txt"를 먼저 읽으세요.
+
 https://isenswonju-print-compare.static.hf.space/handover.html
 
 설치·사용법, 유지보수하는 법, 문제가 생겼을 때의 조치가 모두 들어 있습니다.

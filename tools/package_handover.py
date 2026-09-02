@@ -29,7 +29,10 @@ SKIP_DIRS = {
 SKIP_NAMES = {".DS_Store"}
 SKIP_SUFFIX = {".pyc", ".log"}
 # 절대 넣지 않는 파일 — 비밀번호가 들어가는 곳
-NEVER = {"private/인수인계-계정.md", "private/.library-password"}
+NEVER = {
+    "private/.library-password",
+    "backend/.env.local",
+}
 ACCOUNT_SHEET = ROOT.parent / "인수인계-계정.txt"
 
 

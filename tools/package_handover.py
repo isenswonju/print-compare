@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
             z.write(ACCOUNT_SHEET, "인수인계-계정.txt")
 
     size = dest.stat().st_size
-    print(f"\n✅ 완료 — {dest.name}  ({size / 1e6:,.0f}MB)")
+    print(f"\n[완료] {dest.name}  ({size / 1e6:,.0f}MB)")
 
     print("\n받는 쪽 안내:")
     print("  1) 경로에 한글·띄어쓰기 없는 폴더에 압축을 푼다 (예: C:\\print-compare)")
@@ -105,9 +105,9 @@ def main(argv: list[str] | None = None) -> int:
     if ACCOUNT_SHEET.exists():
         print("\n계정 시트도 압축본 안에 넣었다.")
     else:
-        print("\n⚠️  바탕화면의 인수인계-계정.txt를 찾지 못해 계정 시트는 빠졌다.")
+        print("\n[주의] 바탕화면의 인수인계-계정.txt를 찾지 못해 계정 시트는 빠졌다.")
     if include_private:
-        print("\n⚠️  이 압축본에는 실물 라벨 이미지(의료기기 데이터)가 들어 있다.")
+        print("\n[주의] 이 압축본에는 실물 라벨 이미지(의료기기 데이터)가 들어 있다.")
         print("    사내 전달 경로로만 보내고, 열린 공유 폴더에 두지 말 것.")
     else:
         print("\n참고: private/ 를 뺐다 — 실물 라벨 감시 케이스는 SKIP 되고")

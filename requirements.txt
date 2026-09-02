@@ -1,0 +1,10 @@
+# 인쇄 검수 도구 — 파이썬 의존성
+#   설치:  pip install -r requirements.txt
+# (Windows 는 설치.bat 이 이 파일을 자동으로 처리한다)
+
+opencv-python-headless>=4.10   # 이미지 정합·비교 엔진
+numpy>=1.26
+pypdfium2>=4.30                # PDF 입력 → 600dpi 래스터화
+pytesseract>=0.3.10            # OCR 안전망 (시스템 tesseract 별도 설치 필요)
+huggingface_hub>=0.25          # tools/hf_deploy.py — 배포
+flask>=3.0                     # webapp.py — 사내망 서빙 + 피드백 수집

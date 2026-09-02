@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -41,8 +42,13 @@ def fetch_deployed_version(timeout: int = 15) -> dict:
 
 
 def build() -> None:
+    # Windows 의 npm 은 npm.cmd 라 이름만으로는 subprocess 가 못 찾는다
+    # (FileNotFoundError). which 로 실제 실행 파일을 풀어서 넘긴다.
+    npm = shutil.which("npm")
+    if npm is None:
+        raise SystemExit("npm 을 찾을 수 없다 — Node.js 가 설치돼 있는지 확인할 것.")
     print("· npm run build (web/)")
-    subprocess.run(["npm", "run", "build"], cwd=ROOT / "web", check=True)
+    subprocess.run([npm, "run", "build"], cwd=ROOT / "web", check=True)
 
 
 def check_local_stamp() -> dict:

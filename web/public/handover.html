@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>인쇄 검수 도구 — 유지보수 안내</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Gowun+Batang:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; }
+  img { max-width: 100%; }
+</style>
+<style>
+  :root {
+    --paper:    #FAF9F6;
+    --surface:  #FFFFFF;
+    --sunk:     #F2F0EA;
+    --ink:      #17191C;
+    --muted:    #6A6E73;
+    --rule:     #E1DED6;
+    --accent:   #0B6E99;
+    --on-accent: #FFFFFF;
+    --accent-soft: #E6F0F5;
+    --alert:    #B93A2E;
+    --alert-soft: #F8ECEA;
+    --ok:       #3D7A4C;
+    --shadow:   0 1px 2px rgba(23,25,28,.05);
+
+    --f-head: "IBM Plex Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+    --f-body: "Gowun Batang", "Apple SD Gothic Neo", Georgia, serif;
+    --f-ui:   "IBM Plex Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+    --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:   #14171A;
+      --surface: #1B1F23;
+      --sunk:    #22272C;
+      --ink:     #E7E5E0;
+      --muted:   #9BA1A7;
+      --rule:    #2C3238;
+      --accent:  #5CB4D8;
+      --on-accent: #0E1114;
+      --accent-soft: #16333F;
+      --alert:   #E8837A;
+      --alert-soft: #3A2320;
+      --ok:      #78B487;
+      --shadow:  0 1px 2px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:   #14171A;
+    --surface: #1B1F23;
+    --sunk:    #22272C;
+    --ink:     #E7E5E0;
+    --muted:   #9BA1A7;
+    --rule:    #2C3238;
+    --accent:  #5CB4D8;
+    --on-accent: #0E1114;
+    --accent-soft: #16333F;
+    --alert:   #E8837A;
+    --alert-soft: #3A2320;
+    --ok:      #78B487;
+    --shadow:  0 1px 2px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 16px;
+    line-height: 1.85;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 0 24px 96px;
+  }
+
+  /* ---- 머리말 ---- */
+  .masthead {
+    padding: 56px 0 28px;
+    border-bottom: 2px solid var(--ink);
+  }
+  .eyebrow {
+    font-family: var(--f-ui);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-family: var(--f-head);
+    font-weight: 700;
+    font-size: clamp(30px, 5vw, 40px);
+    line-height: 1.25;
+    letter-spacing: -.02em;
+    margin: 0 0 12px;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 17px;
+    color: var(--muted);
+    margin: 0;
+    max-width: 62ch;
+  }
+
+  /* ---- 섹션 ---- */
+  section { padding-top: 52px; }
+  h2 {
+    font-family: var(--f-head);
+    font-weight: 600;
+    font-size: 22px;
+    letter-spacing: -.01em;
+    margin: 0 0 6px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  h2 .num {
+    font-family: var(--f-mono);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  h3 {
+    font-family: var(--f-head);
+    font-weight: 600;
+    font-size: 16px;
+    margin: 32px 0 10px;
+  }
+  .lede {
+    color: var(--muted);
+    font-size: 15px;
+    margin: 0 0 22px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--rule);
+  }
+  p { margin: 0 0 16px; max-width: 68ch; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 3px;
+  }
+
+  /* ---- 서비스 주소 카드 ---- */
+  .addr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin: 24px 0 0;
+  }
+  .addr div {
+    background: var(--surface);
+    padding: 16px 18px;
+  }
+  .addr dt {
+    font-family: var(--f-ui);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 6px;
+  }
+  .addr dd {
+    margin: 0;
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    word-break: break-all;
+  }
+
+  /* ---- 단계 (실제 순서가 의미를 갖는 곳에만) ---- */
+  .steps { list-style: none; margin: 0; padding: 0; counter-reset: s; }
+  .steps > li {
+    counter-increment: s;
+    position: relative;
+    padding: 0 0 30px 52px;
+    border-left: 1px solid var(--rule);
+    margin-left: 15px;
+  }
+  .steps > li:last-child { border-left-color: transparent; padding-bottom: 4px; }
+  .steps > li::before {
+    content: counter(s);
+    position: absolute;
+    left: -15px;
+    top: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-family: var(--f-mono);
+    font-size: 13px;
+    font-weight: 500;
+    display: grid;
+    place-items: center;
+  }
+  .steps h3 {
+    margin: 2px 0 8px;
+    font-size: 16.5px;
+  }
+  .steps p { margin-bottom: 10px; }
+
+  /* ---- 터미널 ---- */
+  .term {
+    background: var(--sunk);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    margin: 14px 0 16px;
+    overflow: hidden;
+  }
+  .term .cap {
+    font-family: var(--f-ui);
+    font-size: 11.5px;
+    color: var(--muted);
+    padding: 7px 14px;
+    border-bottom: 1px solid var(--rule);
+    letter-spacing: .02em;
+  }
+  .term pre {
+    margin: 0;
+    padding: 13px 14px;
+    overflow-x: auto;
+    font-family: var(--f-mono);
+    font-size: 13px;
+    line-height: 1.75;
+  }
+  .term pre .c { color: var(--muted); }
+  code {
+    font-family: var(--f-mono);
+    font-size: .88em;
+    background: var(--sunk);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* ---- 표 ---- */
+  .tblwrap { overflow-x: auto; margin: 18px 0 8px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--f-ui);
+    font-size: 14px;
+    line-height: 1.65;
+  }
+  th, td {
+    text-align: left;
+    padding: 11px 14px 11px 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom-color: var(--ink);
+    padding-bottom: 8px;
+    white-space: nowrap;
+  }
+  td:first-child { font-weight: 500; padding-right: 22px; }
+  .t-say td:first-child { width: 33%; min-width: 150px; }
+  .say {
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--ink);
+    background: var(--accent-soft);
+    display: block;
+    padding: 9px 12px;
+    border-radius: 4px;
+  }
+
+  /* ---- 체크리스트 ---- */
+  .check { list-style: none; margin: 18px 0 0; padding: 0; }
+  .check li {
+    font-family: var(--f-ui);
+    font-size: 14.5px;
+    padding: 12px 0 12px 30px;
+    border-bottom: 1px solid var(--rule);
+    position: relative;
+  }
+  .check li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 17px;
+    width: 15px; height: 15px;
+    border: 1.5px solid var(--muted);
+    border-radius: 3px;
+  }
+  .check b { font-weight: 600; }
+  .check span { color: var(--muted); font-size: 13px; }
+
+  /* ---- 경고 ---- */
+  .warn {
+    background: var(--alert-soft);
+    border-left: 3px solid var(--alert);
+    padding: 18px 22px;
+    margin: 20px 0;
+  }
+  .warn h3 {
+    margin: 0 0 10px;
+    color: var(--alert);
+    font-size: 15px;
+  }
+  .warn ol { margin: 0; padding-left: 20px; font-family: var(--f-ui); font-size: 14px; line-height: 1.7; }
+  .warn li { margin-bottom: 9px; }
+  .warn li:last-child { margin-bottom: 0; }
+  .warn li b { font-weight: 600; }
+
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 15px 18px;
+    margin: 18px 0;
+    font-family: var(--f-ui);
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--muted);
+    box-shadow: var(--shadow);
+  }
+  .note b { color: var(--ink); font-weight: 600; }
+
+  /* ---- 규칙 3개 ---- */
+  .rules {
+    display: grid;
+    gap: 14px;
+    margin: 20px 0 8px;
+  }
+  .rule {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    align-items: start;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    box-shadow: var(--shadow);
+  }
+  .rule .k {
+    font-family: var(--f-mono);
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--accent);
+    line-height: 1.3;
+  }
+  .rule .t {
+    font-family: var(--f-ui);
+    font-size: 14.5px;
+    line-height: 1.7;
+  }
+  .rule .t b { display: block; font-weight: 600; font-size: 15px; margin-bottom: 3px; }
+
+  footer {
+    margin-top: 64px;
+    padding-top: 22px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--f-ui);
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  @media (max-width: 560px) {
+    .addr { grid-template-columns: 1fr; }
+    .wrap { padding: 0 18px 72px; }
+    .steps > li { padding-left: 40px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">유지보수 인수인계</p>
+    <h1>인쇄 검수 도구 사용 · 유지보수 안내</h1>
+    <p class="standfirst">
+      승인 아트웍과 실물 인쇄물을 겹쳐 보고 인쇄 결함을 찾아내는 사내 도구입니다.
+      앞으로의 유지보수는 <b>Codex</b>(대화로 코드를 고쳐주는 도구)로 합니다.
+      코드를 읽거나 쓸 필요는 없습니다 — 무엇을 원하는지 한국어로 말하면 됩니다.
+    </p>
+  </header>
+
+  <section>
+    <h2><span class="num">01</span> 지금 어디서 돌고 있나</h2>
+    <p class="lede">고칠 곳을 찾기 전에, 무엇이 어디에 살아 있는지부터.</p>
+
+    <p>
+      검사는 <b>전부 접속한 컴퓨터의 브라우저 안에서</b> 실행됩니다. 라벨 이미지가
+      회사 밖 서버로 올라가지 않도록 일부러 그렇게 만들었습니다. 그래서 "서버가
+      죽어서 검사가 안 된다" 같은 일은 구조상 일어나지 않습니다.
+    </p>
+
+    <dl class="addr">
+      <div>
+        <dt>검수 앱 (현장 사용)</dt>
+        <dd><a href="/">i-sens-artwork-compare<br>.static.hf.space</a></dd>
+      </div>
+      <div>
+        <dt>이 안내서</dt>
+        <dd>같은 주소 뒤에<br>/handover.html</dd>
+      </div>
+      <div>
+        <dt>피드백 · 원본 보관함</dt>
+        <dd>inkspect-feedback<br>.vercel.app</dd>
+      </div>
+      <div>
+        <dt>사내망 (맥미니)</dt>
+        <dd>주소는 계정 시트<br>참조</dd>
+      </div>
+    </dl>
+
+    <div class="note">
+      <b>맥미니는 켜 두어야 합니다.</b> 매일 새벽 자동 점검과 사내망 주소가 그
+      컴퓨터에서 돕니다. 다만 위의 검수 앱 주소는 맥미니와 무관하게 항상 열립니다 —
+      현장에서는 이 주소만 쓰면 됩니다.
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">02</span> 계정</h2>
+    <p class="lede">아이디·비밀번호는 별도 시트로 전달됩니다. 이 페이지에는 적지 않습니다.</p>
+
+    <ul class="check">
+      <li><b>Hugging Face</b> <span>— 검수 앱이 배포되는 곳 (I-SENS/artwork-compare)</span></li>
+      <li><b>Vercel</b> <span>— 피드백과 원본 보관함 서버 (inkspect-feedback)</span></li>
+      <li><b>Tailscale</b> <span>— 사내망 주소를 여는 프로그램 (맥미니)</span></li>
+      <li><b>맥미니 로그인</b> <span>— 매일 자동 점검이 도는 컴퓨터</span></li>
+      <li><b>ChatGPT</b> <span>— Codex 로그인에 사용</span></li>
+    </ul>
+
+    <div class="warn">
+      <h3>이 페이지에 비밀번호를 적지 마세요</h3>
+      <ol>
+        <li>이 안내서는 검수 앱과 같은 주소에 올라가 있고, <b>그 주소는 로그인 없이 누구나 열 수 있습니다.</b> 여기에 적으면 인터넷에 공개하는 것과 같습니다.</li>
+        <li>비밀번호는 전달받은 <b>계정 시트</b>(사내 공유 폴더 또는 NAS)에만 두고, 이 페이지에는 "어디에 있는지"만 적어 두세요.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">03</span> 처음 한 번: 설치</h2>
+    <p class="lede">전달받은 압축 파일을 푼 다음, 아래 순서대로 하면 됩니다. Windows 기준입니다.</p>
+
+    <ol class="steps">
+      <li>
+        <h3>압축 풀기</h3>
+        <p>
+          전달받은 압축 파일을 <b>경로에 한글이나 띄어쓰기가 없는 폴더</b>에 푸세요.
+          예: <code>C:\inkspect</code>
+        </p>
+        <p>
+          바탕화면이나 <code>다운로드</code> 폴더에 그냥 풀면 일부 도구가 경로를 못
+          찾는 경우가 있습니다.
+        </p>
+      </li>
+
+      <li>
+        <h3>설치.bat 더블클릭</h3>
+        <p>
+          압축을 푼 폴더 안에 <code>설치.bat</code> 이 있습니다. 더블클릭하면 검은 창이
+          뜨고 필요한 프로그램(Node.js, Python, Codex, 라이브러리)을 <b>알아서 설치</b>합니다.
+          처음에는 10~20분 걸립니다.
+        </p>
+        <p>
+          중간에 파란 경고 창("Windows의 PC 보호")이 뜨면 <b>추가 정보 → 실행</b>을
+          누르세요. 사내에서 만든 파일이라 서명이 없어서 나오는 안내입니다.
+        </p>
+        <div class="note">
+          창 마지막에 <b>[완료]</b> 목록만 있으면 성공입니다. <b>[필요]</b> 가 있으면
+          거기 적힌 대로 처리한 뒤 <code>설치.bat</code> 을 한 번 더 실행하면 됩니다.
+          여러 번 실행해도 안전합니다.
+        </div>
+      </li>
+
+      <li>
+        <h3>Codex 로그인</h3>
+        <p>설치가 끝난 창에 아래를 치고 엔터를 누르세요. 한 번만 하면 됩니다.</p>
+        <div class="term">
+          <div class="cap">브라우저가 열리면 ChatGPT 계정으로 로그인</div>
+          <pre>codex login</pre>
+        </div>
+      </li>
+
+      <li>
+        <h3>시작.bat 으로 열기</h3>
+        <p>
+          앞으로는 폴더 안의 <code>시작.bat</code> 을 더블클릭하면 됩니다.
+          대화창이 열리면 준비 완료입니다. 첫 시험 삼아 아래를 그대로 붙여넣어 보세요.
+        </p>
+        <p><span class="say">이 프로젝트가 무엇을 하는 도구인지, 최근에 무엇이 바뀌었는지 비개발자가 이해할 수 있게 설명해줘.</span></p>
+      </li>
+    </ol>
+
+    <div class="note">
+      <b>규칙은 이미 들어 있습니다.</b> 폴더 안의 <code>AGENTS.md</code> 파일에
+      "이건 절대 하지 마라", "고친 뒤엔 이 검사를 돌려라" 같은 규칙이 적혀 있고,
+      Codex 가 대화를 시작할 때 자동으로 읽습니다. 매번 설명하지 않아도 됩니다.
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">04</span> 유지보수하는 법</h2>
+    <p class="lede">코드를 고치는 일이 아니라, 무엇을 원하는지 말하는 일입니다.</p>
+
+    <div class="rules">
+      <div class="rule">
+        <div class="k">1</div>
+        <div class="t">
+          <b>겁나면 "설명만 해줘"로 시작합니다</b>
+          바로 고치라고 하지 말고 <i>"어떻게 고칠 건지 먼저 설명만 해줘. 아직 고치지 마."</i>
+          라고 하면 계획만 보여줍니다. 읽고 납득되면 그때 "그대로 해줘".
+        </div>
+      </div>
+      <div class="rule">
+        <div class="k">2</div>
+        <div class="t">
+          <b>"고쳐줘" 뒤에 "검사도 돌려줘"를 붙입니다</b>
+          이 프로젝트에는 실수를 잡아내는 자동 검사가 있습니다.
+          <i>"고친 뒤에 테스트와 bench 검사를 돌리고 결과를 보여줘."</i>
+          결과가 PASS 여야 안심할 수 있습니다.
+        </div>
+      </div>
+      <div class="rule">
+        <div class="k">3</div>
+        <div class="t">
+          <b>화면에 보이는 것을 바꿨으면 "배포까지" 말합니다</b>
+          고치기만 하면 이 컴퓨터에만 반영됩니다. 현장에서 보려면 배포해야 합니다.
+          <i>"배포까지 해줘."</i> 한 마디면 됩니다.
+        </div>
+      </div>
+    </div>
+
+    <h3>상황별로 그대로 붙여넣을 문장</h3>
+    <div class="tblwrap">
+      <table class="t-say">
+        <thead>
+          <tr><th>이럴 때</th><th>이렇게 말합니다</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>사용자 피드백을 처리하고 싶다</td>
+            <td><span class="say">미확인 피드백 목록을 보여주고, 지적된 내용을 조사해서 원인을 설명해줘. 고칠 수 있으면 고치고, 검사와 배포까지 한 다음 피드백 상태를 확인으로 바꿔줘.</span></td>
+          </tr>
+          <tr>
+            <td>결함이 아닌 걸 결함이라 한다 (오탐)</td>
+            <td><span class="say">앱 피드백에서 오탐으로 지목된 최근 건들을 확인하고 원인을 찾아서 고쳐줘. 고친 뒤 테스트와 bench 검사를 돌리고 결과를 보여줘.</span></td>
+          </tr>
+          <tr>
+            <td>진짜 결함을 못 잡는다 (미검출)</td>
+            <td><span class="say">이 아트웍 쌍에서 ○○ 부분의 결함을 못 잡는다. 원인을 조사하고 bench 케이스로 등록해줘. 임계값을 바꿔야 한다면 근거 수치를 같이 보여줘.</span></td>
+          </tr>
+          <tr>
+            <td>화면 문구·버튼을 바꾸고 싶다</td>
+            <td><span class="say">앱 화면의 '○○○' 문구를 '×××'로 바꿔줘. 바꾼 뒤 web 테스트를 돌리고 배포까지 해줘.</span></td>
+          </tr>
+          <tr>
+            <td>고친 걸 현장에 반영하고 싶다</td>
+            <td><span class="say">지금 코드를 실서비스에 배포해줘. 배포 후 지문 검증까지 확인하고 알려줘.</span></td>
+          </tr>
+          <tr>
+            <td>밤새 자동 점검 결과가 궁금하다</td>
+            <td><span class="say">어젯밤 자동 점검(bench sync) 결과를 확인하고, 문제가 있으면 무엇이 문제인지 쉽게 설명해줘.</span></td>
+          </tr>
+          <tr>
+            <td>지금 상태가 정상인지 보고 싶다</td>
+            <td><span class="say">테스트와 bench 검사를 전부 돌려서 지금 상태가 정상인지 확인해줘.</span></td>
+          </tr>
+          <tr>
+            <td>뭐가 바뀌었는지 모르겠다</td>
+            <td><span class="say">최근 커밋 10개를 비개발자가 이해할 수 있게 한 줄씩 설명해줘.</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <b>승인 창이 뜨면.</b> Codex 는 파일을 고치거나 명령을 실행하기 전에 물어봅니다.
+      무엇을 하려는지 한 줄로 보여주니 읽고 승인하면 됩니다. <b>파일 삭제</b>가
+      보이면 한 번 더 생각하고, 애매하면 거절한 뒤 "왜 그게 필요한지 설명해줘"라고
+      물어보세요.
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">05</span> 피드백 처리</h2>
+    <p class="lede">현장 의견이 정확도를 고치는 유일한 근거입니다. 처리 상태는 앱과 자동으로 맞춰집니다.</p>
+
+    <p>
+      피드백 페이지는 앱 상단의 <b>💬</b> 단추로 열립니다. <b>비밀번호가 없습니다</b> —
+      팀 누구나 열어 현장 의견과 처리 상태를 볼 수 있습니다.
+    </p>
+
+    <p>
+      검수 결과에서 잘못 잡은 항목이 보이면, 사용자가 앱에서 <b>'미확인'</b>을 눌러
+      이유를 남깁니다. 이 의견이 <b>피드백 페이지</b>에 쌓이고, 정확도 개선은 전적으로
+      이 데이터를 근거로 진행합니다. "요즘 좀 이상하다"는 말만으로는 고칠 수 없으니
+      현장에 이 버튼을 꼭 안내해 주세요.
+    </p>
+
+    <p>
+      대화로 피드백을 처리하면 <b>앱의 피드백 페이지 상태도 함께 바뀝니다.</b>
+      Codex 가 반영을 마친 뒤 해당 건을 '확인'으로 표시하도록 되어 있어, 다른 사람이
+      같은 건을 다시 조사하는 일이 없습니다. 손으로 앱에서 누르는 확인/미확인 토글과
+      같은 기록을 씁니다.
+    </p>
+
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>단계</th><th>일어나는 일</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1. 접수</td><td>현장에서 '미확인'을 누르면 피드백 페이지에 <b>미확인</b>으로 쌓입니다.</td></tr>
+          <tr><td>2. 조사</td><td>대화로 원인을 묻습니다. 지적 사유와 코멘트를 Codex 가 읽고 설명합니다.</td></tr>
+          <tr><td>3. 반영</td><td>고칠 수 있으면 고치고, 자동 검사를 통과시킨 뒤 배포합니다.</td></tr>
+          <tr><td>4. 마감</td><td>해당 건이 <b>확인</b>으로 바뀝니다. 앱 피드백 페이지에 바로 보입니다.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <b>고치지 않기로 한 건도 닫습니다.</b> 기술적으로 잡을 수 없는 결함이 있습니다
+      (아주 가는 획의 끊김 등). 이런 건은 이유를 설명받고 납득한 뒤 '확인'으로 닫으면
+      됩니다. 열어 두면 계속 다시 조사하게 됩니다.
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">06</span> 저절로 돌아가는 것들</h2>
+    <p class="lede">평소엔 손댈 필요가 없습니다. 문제가 있을 때만 알림이 뜹니다.</p>
+
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>언제</th><th>무엇이 일어나나</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>매일 새벽 3:10</td><td>맥미니가 전체 정확도 검사를 돌리고, 배포된 앱이 최신인지 대조하고, 새로 올라온 원본 아트웍을 감시 목록에 추가합니다.</td></tr>
+          <tr><td>코드를 저장할 때마다</td><td>검사 엔진을 건드린 변경이면 오탐 감시 검사가 30초간 자동으로 돕니다. 깨지면 저장이 막힙니다.</td></tr>
+          <tr><td>사용자가 피드백을 남길 때</td><td>'미확인' 표시가 서버에 쌓입니다. 정확도를 개선하는 유일한 근거 데이터입니다.</td></tr>
+          <tr><td>맥미니 재부팅</td><td>사내망 서버와 공유 주소가 자동으로 다시 켜집니다.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">07</span> 하면 안 되는 것</h2>
+    <p class="lede">전부 실제로 사고가 났던 항목입니다. Codex 에게도 같은 규칙이 걸려 있습니다.</p>
+
+    <div class="warn">
+      <h3>이 네 가지는 Codex 가 하겠다고 해도 막으세요</h3>
+      <ol>
+        <li><b>검사 결과가 FAIL 인데 그냥 넘어가기.</b> 자동 검사가 막았다는 건 잘 되던 게 깨졌다는 뜻입니다. 원인을 고친 뒤에 진행하세요.</li>
+        <li><b>기준선을 확인 없이 승인하기.</b> "기준선을 갱신할까요"라고 물으면, 결과를 눈으로 확인하기 전엔 승인하지 마세요. 승인해 버리면 오류가 새 정답이 됩니다.</li>
+        <li><b>실물 라벨 이미지를 저장소에 올리기.</b> 의료기기 데이터입니다. 이미지 파일을 커밋하려 하면 거절하세요.</li>
+        <li><b>고쳐 놓고 배포를 빠뜨리기.</b> 현장은 계속 옛날 버전을 씁니다. 실제로 이 때문에 오탐 45건이 다시 올라온 적이 있습니다.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">08</span> 문제가 생겼을 때</h2>
+    <p class="lede">대부분 아래 표에서 끝납니다. 안 되면 증상을 그대로 대화창에 말하세요.</p>
+
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>증상</th><th>조치</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>앱이 안 열린다</td>
+            <td>검수 앱 주소를 먼저 시도합니다. 이건 맥미니와 무관하게 열려야 정상입니다. 사내망 주소만 안 열리면 맥미니가 꺼졌거나 잠든 것입니다.</td>
+          </tr>
+          <tr>
+            <td>배포했는데 화면이 그대로다</td>
+            <td>브라우저에서 <code>Ctrl</code>+<code>Shift</code>+<code>R</code> 로 강제 새로고침. 그래도 그대로면 <b>"배포 지문을 확인해줘"</b> 라고 하세요.</td>
+          </tr>
+          <tr>
+            <td>검수 결과가 이상하다</td>
+            <td>앱에서 '미확인'을 눌러 근거를 남긴 뒤, 04번 표의 첫 줄 문장을 붙여넣으세요.</td>
+          </tr>
+          <tr>
+            <td>대화가 엉뚱한 답을 한다</td>
+            <td>대화가 길어지면 흐려집니다. 창을 닫고 <code>시작.bat</code> 으로 새로 시작한 뒤, 원하는 것을 더 구체적으로 한 문장으로 말하세요.</td>
+          </tr>
+          <tr>
+            <td>파일을 못 찾는다고 한다</td>
+            <td>프로젝트 폴더 밖에서 열린 것입니다. 창을 닫고 <code>시작.bat</code> 으로 다시 여세요.</td>
+          </tr>
+          <tr>
+            <td>망친 것 같다 / 되돌리고 싶다</td>
+            <td>저장(커밋) 전이라면 <b>"방금 바꾼 것을 전부 되돌려줘"</b>. 저장까지 했다면 <b>"마지막 커밋을 되돌려줘"</b>. 배포 전이면 현장에는 아무 영향이 없습니다.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">09</span> 백업</h2>
+    <p class="lede">NAS 에 두는 방법과, 두면 안 되는 것.</p>
+
+    <p>
+      <b>NAS 는 보관용으로만 쓰세요.</b> NAS 폴더에서 직접 작업하면 빌드가 몇 배로
+      느려지고, 파일 변경 감지와 저장 이력 기능이 자주 깨집니다. 작업은 항상
+      컴퓨터 내장 디스크(<code>C:\inkspect</code> 같은 곳)에서 하고, 주기적으로
+      폴더째 압축해 NAS 에 올려 두는 방식이 안전합니다.
+    </p>
+
+    <p>백업할 때 <b>빼도 되는 폴더</b>입니다. 용량 대부분을 차지하고, 언제든 다시 만들어집니다.</p>
+    <div class="term">
+      <div class="cap">압축에서 제외해도 되는 폴더</div>
+      <pre>web\node_modules      web\dist
+bench\work            bench\out</pre>
+    </div>
+
+    <div class="warn">
+      <h3>NAS 에 올릴 때 확인할 것</h3>
+      <ol>
+        <li><b>공유 범위.</b> 백업본에는 실물 라벨 이미지(의료기기 데이터)와 피드백이 들어 있습니다. 아무나 열 수 있는 공유 폴더에 두지 마세요.</li>
+        <li><b>계정 시트는 따로.</b> 비밀번호 시트는 백업본 안이 아니라, 접근이 통제된 별도 위치에 두세요.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">10</span> 용어</h2>
+    <p class="lede">대화창이 이 단어들을 씁니다. 뜻만 알면 훨씬 편합니다.</p>
+
+    <div class="tblwrap">
+      <table>
+        <tbody>
+          <tr><td>REF / TEST</td><td>REF 는 승인된 원본 아트웍, TEST 는 실제로 인쇄해 스캔한 것. 이 둘을 겹쳐 비교합니다.</td></tr>
+          <tr><td>오탐</td><td>결함이 아닌 것을 결함이라고 잘못 잡은 것.</td></tr>
+          <tr><td>미검출</td><td>진짜 결함인데 못 잡은 것. 오탐보다 위험합니다.</td></tr>
+          <tr><td>임계값</td><td>"이만큼 차이나면 결함으로 본다"는 기준 숫자. 낮추면 많이 잡고(오탐 증가), 올리면 놓칩니다.</td></tr>
+          <tr><td>bench / 안전망</td><td>정답을 아는 30개 사례로 "잘 되던 게 깨졌는지" 자동 확인하는 장치.</td></tr>
+          <tr><td>기준선</td><td>현재 인정된 정상 결과. 사람이 확인한 뒤에만 갱신합니다.</td></tr>
+          <tr><td>커밋</td><td>변경 내용에 이름을 붙여 저장하는 것. 되돌릴 수 있는 저장 지점입니다.</td></tr>
+          <tr><td>배포</td><td>고친 것을 현장이 쓰는 앱에 실제로 올리는 것.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    인쇄 검수 도구 인수인계 안내 · 2026년 9월<br>
+    상세 기술 문서는 프로젝트 폴더의 <code>README.md</code>,
+    대화 도구용 규칙은 <code>AGENTS.md</code> 에 있습니다.
+  </footer>
+
+</div>
+
+</body>
+</html>

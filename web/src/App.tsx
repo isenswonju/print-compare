@@ -1098,6 +1098,8 @@ export default function App() {
         <a href="#" className={view === "results" ? "on" : ""}
            onClick={(e) => { e.preventDefault(); setView("results"); }}>
           결과{setCount ? ` (${setCount})` : ""}</a>
+        <a href="/handover.html" target="_blank" rel="noreferrer"
+           title="설치·사용·유지보수 설명서를 새 창에서 엽니다">사용설명서</a>
         {running && (
           <span className="gnb-status">
             <span className="spin" />{stageText || "분석 중"} · {elapsed}초

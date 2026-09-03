@@ -1,0 +1,40 @@
+name: 수동 검수 앱 배포
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Hugging Face 검수 앱 배포
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 소스 받기
+        uses: actions/checkout@v6
+
+      - name: Python 준비
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Node.js 준비
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          cd web
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: 빌드·업로드·실서비스 확인
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python tools/hf_deploy.py

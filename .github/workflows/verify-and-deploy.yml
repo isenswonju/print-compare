@@ -16,6 +16,26 @@ permissions:
   contents: read
 
 jobs:
+  ensure-space-public:
+    name: 검수 앱 공개 접근 보장
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Hugging Face Space를 로그인 없이 열리게 설정
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python -m pip install --quiet huggingface_hub
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          api.update_repo_settings(
+              "isenswonju/print-compare", repo_type="space", private=False
+          )
+          PY
+
   verify:
     name: 정확도 및 웹 검사
     runs-on: ubuntu-latest

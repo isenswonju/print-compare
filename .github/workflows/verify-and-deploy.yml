@@ -43,18 +43,7 @@ jobs:
       - name: 시스템 및 Python 의존성 설치
         run: |
           sudo apt-get update
-          sudo apt-get install --yes \
-            autoconf automake g++ libarchive-dev libcurl4-openssl-dev \
-            libleptonica-dev libtool make pkg-config
-          curl -fsSL https://github.com/tesseract-ocr/tesseract/archive/refs/tags/5.5.2.tar.gz \
-            | tar -xz
-          cd tesseract-5.5.2
-          ./autogen.sh
-          ./configure --disable-doc
-          make --jobs 2
-          sudo make install
-          sudo ldconfig
-          cd ..
+          sudo apt-get install --yes tesseract-ocr
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pytest
           # 기준선과 동일한 수치 라이브러리로 고정해 환경 차이 오탐을 막는다.

@@ -42,7 +42,9 @@ jobs:
 
   verify:
     name: 정확도 및 웹 검사
-    runs-on: ubuntu-latest
+    # 정확도 기준선이 승인된 Darwin arm64 환경과 같은 표준 M1 러너를 쓴다.
+    # OpenCV 영상 연산은 OS/CPU가 달라지면 경계 픽셀 결과가 달라질 수 있다.
+    runs-on: macos-14
     # GitHub의 공유 러너에서는 전체 정확도 검사가 로컬보다 오래 걸린다.
     timeout-minutes: 75
 
@@ -66,12 +68,12 @@ jobs:
 
       - name: 시스템 및 Python 의존성 설치
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes tesseract-ocr
+          brew list tesseract >/dev/null 2>&1 || brew install tesseract
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pytest
-          # 기준선과 동일한 수치 라이브러리로 고정해 환경 차이 오탐을 막는다.
-          python -m pip install --force-reinstall "numpy==2.4.6"
+          # 기준선과 동일한 수치 라이브러리 조합으로 고정한다.
+          python -m pip install --force-reinstall \
+            "numpy==2.4.6" "opencv-python-headless==5.0.0.93"
 
       - name: 웹 의존성 설치
         working-directory: web

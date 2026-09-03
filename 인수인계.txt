@@ -41,7 +41,7 @@ GitHub 코드 저장소
   https://github.com/isenswonju/print-compare
 
 검수 앱
-  https://isenswonju-print-compare.static.hf.space
+  https://i-sens-print-compare.static.hf.space
 
 피드백·원본 보관함
   https://print-compare-feedback.vercel.app
@@ -81,4 +81,3 @@ GitHub 저장소의 Actions Secrets(HF_TOKEN, VERCEL_TOKEN)에 등록되어 있�
 [ ] 검수 앱이 열린다
 [ ] 원본 보관함의 기존 목록이 보인다
 [ ] 피드백 페이지가 열린다
-

@@ -172,7 +172,7 @@ describe("sevCounts", () => {
 
 describe("computeFeedbackEndpoints", () => {
   it("hf.space 호스트는 수집 서버 없음", () => {
-    expect(computeFeedbackEndpoints("isenswonju-print-compare.static.hf.space"))
+    expect(computeFeedbackEndpoints("i-sens-print-compare.static.hf.space"))
       .toEqual([]);
   });
   it("사내망 호스트는 /feedback", () => {
@@ -184,7 +184,7 @@ describe("computeFeedbackEndpoints", () => {
 describe("feedbackTargets", () => {
   it("수집기 URL이 있으면 호스트와 무관하게 그리로만 보낸다", () => {
     const url = "https://print-compare-feedback.vercel.app/api/feedback";
-    expect(feedbackTargets(url, "isenswonju-print-compare.static.hf.space"))
+    expect(feedbackTargets(url, "i-sens-print-compare.static.hf.space"))
       .toEqual([url]);
     expect(feedbackTargets(url, "192.168.24.23")).toEqual([url]);
   });

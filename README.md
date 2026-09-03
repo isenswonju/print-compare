@@ -5,7 +5,7 @@
 
 **주 사용 형태는 브라우저판(`web/`)이다** — 분석 전체가 접속자 브라우저(wasm)
 안에서 실행되는 정적 SPA. 배포:
-- 상시(무료): https://isenswonju-print-compare.static.hf.space/
+- 상시(무료): https://i-sens-print-compare.static.hf.space/
 - 사내망: http://<맥미니 IP>:8501/app/ (launchd 상주 `webapp.py`가 서빙)
 
 구성 요소:

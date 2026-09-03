@@ -204,7 +204,7 @@ if ($fail.Count -eq 0) {
   Write-Host "  인수인계 세팅이 모두 끝났습니다." -ForegroundColor White
   Write-Host "   앞으로는 '시작.bat'만 더블클릭하면 됩니다."
   Write-Host "   인수인계서(사용법)는 아래 주소에 있습니다:"
-  Write-Host "      https://isenswonju-print-compare.static.hf.space/handover.html" -ForegroundColor Cyan
+  Write-Host "      https://i-sens-print-compare.static.hf.space/handover.html" -ForegroundColor Cyan
 } else {
   Write-Host "  [필요] 항목을 처리한 뒤 '설치.bat' 을 다시 실행하세요." -ForegroundColor Yellow
 }

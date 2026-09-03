@@ -27,8 +27,8 @@ from bench.engines import git_state, pipeline_hash  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "web" / "dist"
-REPO_ID = "isenswonju/print-compare"
-SPACE_URL = "https://isenswonju-print-compare.static.hf.space"
+REPO_ID = "I-SENS/print-compare"
+SPACE_URL = "https://i-sens-print-compare.static.hf.space"
 VERIFY_TRIES = 10          # CDN 전파를 기다리는 재시도 횟수
 VERIFY_WAIT_S = 20
 
@@ -73,7 +73,7 @@ def upload(stamp: dict) -> None:
     print(f"· upload_folder → {REPO_ID} ({msg})")
     # 최초 배포에서도 비개발자가 Space를 따로 만들 필요가 없게 한다.
     create_repo(repo_id=REPO_ID, repo_type="space", space_sdk="static",
-                exist_ok=True)
+                private=False, exist_ok=True)
     # delete_patterns: 해시 파일명이 매번 바뀌어 옛 번들이 무한히 쌓인다 — 청소.
     upload_folder(repo_id=REPO_ID, repo_type="space", folder_path=str(DIST),
                   commit_message=msg, delete_patterns=["assets/**"])

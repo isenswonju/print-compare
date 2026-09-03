@@ -19,7 +19,8 @@ jobs:
   verify:
     name: 정확도 및 웹 검사
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # GitHub의 공유 러너에서는 전체 정확도 검사가 로컬보다 오래 걸린다.
+    timeout-minutes: 60
 
     steps:
       - name: 소스 받기

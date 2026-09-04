@@ -14,7 +14,9 @@ function FileThumb({ entry }: { entry: FileEntry }) {
     setSrc(url);
     return () => URL.revokeObjectURL(url);
   }, [source]);
-  return <img className="fe-thumb" src={src} alt="" aria-hidden="true" />;
+  return src
+    ? <img className="fe-thumb" src={src} alt="" aria-hidden="true" />
+    : <span className="fe-thumb" aria-hidden="true" />;
 }
 
 // ---------------------------------------------------------------- 다중 드롭존

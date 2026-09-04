@@ -150,8 +150,9 @@ export default function App() {
   // 첫 업로드는 원본↔인쇄물이 이름순으로 자연 매칭되게 한다.
   // setName: 보관함에서 투입할 때만 넘어옴(그 파일이 속한 섹션 이름).
   const addFiles = async (id: number, which: "ref" | "test", files: File[],
-                          setName?: string) => {
+                          setName?: string, multiMode?: boolean) => {
     const key = `${id}:${which}`;
+    const usePrep = multiMode ?? !!pairs.find((p) => p.id === id)?.multi;
     setConverting((c) => ({ ...c, [key]: true }));
     setError("");
     try {
@@ -159,7 +160,7 @@ export default function App() {
       for (const file of files) {
         // 원본 면은 이미 확정된 전처리가 있으면 그대로 적용해 넣는다.
         // 확정된 게 없으면 평소대로 넣고, 아래에서 정리 제안을 띄운다.
-        const prep = which === "ref"
+        const prep = which === "ref" && usePrep
           ? await hashFile(file).then(savedPrep).catch(() => undefined)
           : undefined;
         const pages = prep
@@ -185,9 +186,10 @@ export default function App() {
           hashFile(e.file).then((h) => saveArtwork(h, e.file)).catch(() => {})));
         await refreshLibrary();
         scheduleSync();
-        // 아직 정리 설정이 없는 원판이면 제안을 띄운다(파일 1개일 때만 —
-        // 여러 장을 한꺼번에 물어보면 흐름이 끊긴다).
-        if (newEntries.length === 1) await askPrep(id, newEntries[0].file);
+        // 정리는 다중 샘플에서만 필요하다. 아직 설정이 없는 원판 한 장이면
+        // 샘플 영역을 고르도록 제안을 띄운다.
+        if (usePrep && newEntries.length === 1)
+          await askPrep(id, newEntries[0].file);
       }
     } catch (err) {
       setError(`파일 처리 실패: ` + String((err as Error).message || err));
@@ -282,6 +284,14 @@ export default function App() {
   };
   const anyConverting = Object.values(converting).some(Boolean);
   const editingLocked = running || anyConverting || prepPending || prepBusy || !!prepAsk;
+  const toggleMulti = (id: number, enabled: boolean) => {
+    const pair = pairs.find((p) => p.id === id);
+    setPairs((ps) => ps.map((p) => p.id === id ? { ...p, multi: enabled } : p));
+    // 이미 원본을 넣은 뒤 모드를 바꿔도 즉시 올바른 원본으로 다시 만든다.
+    // 켜면 정리 설정을 적용/제안하고, 끄면 정제하지 않은 원본으로 복원한다.
+    if (pair?.ref.length)
+      void addFiles(id, "ref", pair.ref.map((e) => e.file), undefined, enabled);
+  };
   const addPair = () =>
     setPairs((ps) => [...ps, { id: ++pairSeq, ref: [], test: [] }]);
   const removePair = (id: number) =>
@@ -459,8 +469,9 @@ export default function App() {
   })();
 
   // 보관함 원본 한 행: 클릭해 투입 + 드래그해서 폴더 이동 + 삭제.
-  const renderArtwork = (a: ArtworkEntry) => (
+  const renderArtwork = (a: ArtworkEntry, depth = 0) => (
     <div className="artitem-row" key={a.hash} draggable={!running}
+         style={{ paddingLeft: depth * 12 }}
          onDragStart={(e) => {
            e.dataTransfer.setData("text/hash", a.hash);
            e.dataTransfer.effectAllowed = "move";
@@ -564,7 +575,7 @@ export default function App() {
         {isOpen && (
           <>
             {children.map((c) => renderSection(c, depth + 1))}
-            {arts.map(renderArtwork)}
+            {arts.map((a) => renderArtwork(a, depth + 1))}
             {arts.length === 0 && children.length === 0 && (
               <div className="sec-empty">여기로 파일이나 폴더를 끌어놓으세요</div>
             )}
@@ -1515,7 +1526,7 @@ export default function App() {
                 return (
                   <div className="sec-group">
                     {sections.length > 0 && <div className="sec-head plain">미분류</div>}
-                    {unfiled.map(renderArtwork)}
+                    {unfiled.map((a) => renderArtwork(a))}
                     {unfiled.length === 0 && sections.length > 0 && (
                       <div className="sec-empty">여기로 드래그하면 분류 해제</div>
                     )}
@@ -1549,9 +1560,7 @@ export default function App() {
                                     "찾아 샘플별로 나눠 검수합니다."}>
                         <input type="checkbox" checked={!!p.multi}
                                disabled={editingLocked}
-                               onChange={(e) => setPairs((ps) => ps.map((x) =>
-                                 x.id === p.id
-                                   ? { ...x, multi: e.target.checked } : x))} />
+                               onChange={(e) => toggleMulti(p.id, e.target.checked)} />
                         {" "}다중 샘플
                       </label>
                       {pairs.length > 1 && (

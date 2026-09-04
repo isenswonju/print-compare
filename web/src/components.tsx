@@ -1,10 +1,21 @@
 // UI 부품: 드롭존(썸네일), 오버레이 검사기(결함 한정 확대경 + 피드백 진입),
 // 피드백 팝업(확대 포함), 세트 결과 상세.
 import React, { useEffect, useRef, useState } from "react";
-import { LENS_H, LENS_W, clamp, displayCsv, download, drawLensInto,
-         sevCounts } from "./lib.ts";
+import { LENS_H, LENS_W, displayCsv, download, drawLensInto,
+         sevCounts, viewportPanelPosition } from "./lib.ts";
 import type { DispFinding, FileEntry, MissedFb, ResultItem,
               SetFb } from "./types.ts";
+
+function FileThumb({ entry }: { entry: FileEntry }) {
+  const source = entry.pages[0] || entry.file;
+  const [src, setSrc] = useState("");
+  useEffect(() => {
+    const url = URL.createObjectURL(source);
+    setSrc(url);
+    return () => URL.revokeObjectURL(url);
+  }, [source]);
+  return <img className="fe-thumb" src={src} alt="" aria-hidden="true" />;
+}
 
 // ---------------------------------------------------------------- 다중 드롭존
 // 여러 파일(이미지/PDF)을 받는다. PDF는 페이지 수만큼 펼쳐지며, 총 페이지 수를
@@ -90,6 +101,7 @@ export function MultiDropZone({ label, entries, busy, disabled,
                 onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}>
               {!disabled && onReorder &&
                 <span className="fe-grip" title="드래그해서 순서 변경">⠿</span>}
+              <FileThumb entry={en} />
               <span className="fe-name" title={en.name}>{en.name}</span>
               {!disabled && (
                 <button type="button" className="fe-rm" aria-label="제거"
@@ -175,7 +187,7 @@ export function OverlayInspector({ annotated, refCanvas, alignedCanvas, defects,
 
   const move = (e: React.MouseEvent) => {
     if (!annotated || !refCanvas) return;
-    const { X, Y, rect, px, py, inside } = toFull(e);
+    const { X, Y, inside } = toFull(e);
     if (!inside) return hide();
     const f = hitDefect(X, Y);
     annotated.style.cursor = f ? "pointer" : "crosshair";
@@ -185,9 +197,12 @@ export function OverlayInspector({ annotated, refCanvas, alignedCanvas, defects,
     drawLensInto(alignedCanvas, testLens.current, X, Y, f.bbox_ref);
     const p = panel.current!;
     p.style.display = "block";
-    p.style.left = (px > rect.width / 2 ? px - LENS_W - 40 : px + 24) + "px";
-    p.style.top =
-      clamp(py - LENS_H, 0, Math.max(0, rect.height - 2 * LENS_H - 80)) + "px";
+    const pos = viewportPanelPosition(
+      e.clientX, e.clientY, p.offsetWidth, p.offsetHeight,
+      document.documentElement.clientWidth, window.innerHeight,
+    );
+    p.style.left = pos.left + "px";
+    p.style.top = pos.top + "px";
   };
 
   const click = (e: React.MouseEvent) => {

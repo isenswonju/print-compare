@@ -154,8 +154,12 @@ a { color: var(--red); }
   list-style: none; margin: 8px 0 4px; padding: 0; width: 100%; flex: 1;
 }
 .fileentry {
-  display: flex; align-items: center; gap: 6px; padding: 3px 4px;
+  display: flex; align-items: center; gap: 7px; padding: 4px;
   font-size: 0.78rem; border-radius: 6px; min-width: 0; max-width: 100%;
+}
+.fe-thumb {
+  width: 46px; height: 46px; flex: none; object-fit: contain;
+  border: 1px solid var(--line); border-radius: 5px; background: #fff;
 }
 .fileentry:hover { background: #f2f3f5; }
 .fileentry.reorderable { cursor: grab; }
@@ -485,7 +489,7 @@ details summary { cursor: pointer; }
 
 /* 확대경 + 미검출 마커 + 팝업 */
 .lens {
-  position: absolute;
+  position: fixed;
   z-index: 10;
   background: #fff;
   border: 1px solid #999;
@@ -493,8 +497,24 @@ details summary { cursor: pointer; }
   padding: 6px 8px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
   pointer-events: none;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  overflow: hidden;
 }
-.lens canvas { display: block; border: 1px solid #eee; max-width: none; }
+.lens canvas {
+  display: block; border: 1px solid #eee;
+  width: min(460px, calc(100vw - 42px)); height: auto;
+}
+
+.prep-wait { z-index: 70; }
+.prep-wait-card {
+  width: min(420px, calc(100vw - 32px)); padding: 28px 24px;
+  border-radius: 12px; background: #fff; text-align: center;
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.25);
+}
+.prep-wait-card .spin { display: inline-block; margin-right: 8px; }
+.prep-wait-card h3 { display: inline; }
+.prep-wait-card p { margin: 12px 0 0; color: var(--muted); line-height: 1.5; }
 .lens .lbl, .modal .lbl {
   font-weight: 700;
   font-size: 0.75rem;

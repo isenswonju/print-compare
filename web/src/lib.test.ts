@@ -5,7 +5,7 @@ import {
   drawLensInto, entryDay, feedbackCsv, feedbackTargets, flushFbQueue,
   fmtDateTime, fmtMB, loadFbQueue, mapDisplay, restoreResults, saveFbQueue,
   serializeResults, sevCounts, slimPayload, summarizeFeedbackForChat, buildErrorReport,
-  trySendFeedback, type AdminEntry, type FeedbackPayload,
+  trySendFeedback, viewportPanelPosition, type AdminEntry, type FeedbackPayload,
 } from "./lib.ts";
 import type { DispFinding, Finding, ResultItem } from "./types.ts";
 
@@ -18,6 +18,18 @@ describe("fmtMB", () => {
   it("바이트를 MB로", () => {
     expect(fmtMB(1024 * 1024)).toBe("1.0MB");
     expect(fmtMB(1.5 * 1024 * 1024)).toBe("1.5MB");
+  });
+});
+
+describe("viewportPanelPosition", () => {
+  it("keeps the magnifier inside the bottom-right viewport edge", () => {
+    expect(viewportPanelPosition(990, 790, 460, 520, 1000, 800))
+      .toEqual({ left: 518, top: 268 });
+  });
+
+  it("keeps an oversized panel pinned to the viewport gap", () => {
+    expect(viewportPanelPosition(10, 10, 600, 900, 500, 700))
+      .toEqual({ left: 12, top: 12 });
   });
 });
 

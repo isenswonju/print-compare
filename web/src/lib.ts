@@ -11,6 +11,19 @@ export const SEV_ORDER: Record<string, number> =
 
 export const fmtMB = (b: number) => (b / 1024 / 1024).toFixed(1) + "MB";
 
+/** Keep a floating panel inside the viewport while preferring the cursor's right. */
+export function viewportPanelPosition(
+  clientX: number, clientY: number, panelW: number, panelH: number,
+  viewportW: number, viewportH: number, gap = 12,
+): { left: number; top: number } {
+  let left = clientX + gap;
+  if (left + panelW > viewportW - gap) left = clientX - panelW - gap;
+  left = clamp(left, gap, Math.max(gap, viewportW - panelW - gap));
+  const top = clamp(clientY - panelH / 2, gap,
+    Math.max(gap, viewportH - panelH - gap));
+  return { left, top };
+}
+
 // 분석 일시 표기 (예: 2026-07-27 10:36). 결과가 7일 보존되므로 언제 분석한
 // 결과인지 화면에 남긴다.
 export function fmtDateTime(ts: number): string {

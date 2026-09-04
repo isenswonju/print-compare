@@ -105,6 +105,7 @@ export default function App() {
   const [prepLayers, setPrepLayers] = useState<string[]>([]);
   const [prepCand, setPrepCand] = useState(-1);
   const [prepBusy, setPrepBusy] = useState(false);
+  const [prepPending, setPrepPending] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // 저장된 세션 스냅샷 — 피드백만 바뀔 때 이미지 재직렬화를 피하려고 들고 있는다
   const storedRef = useRef<StoredSet[] | null>(null);
@@ -186,7 +187,7 @@ export default function App() {
         scheduleSync();
         // 아직 정리 설정이 없는 원판이면 제안을 띄운다(파일 1개일 때만 —
         // 여러 장을 한꺼번에 물어보면 흐름이 끊긴다).
-        if (newEntries.length === 1) askPrep(id, newEntries[0].file);
+        if (newEntries.length === 1) await askPrep(id, newEntries[0].file);
       }
     } catch (err) {
       setError(`파일 처리 실패: ` + String((err as Error).message || err));
@@ -196,6 +197,7 @@ export default function App() {
   };
   // 원판 정리 제안 — 이미 확정된 게 있으면 묻지 않는다(팀에서 한 번만 정한다).
   const askPrep = async (pairId: number, file: File) => {
+    setPrepPending(true);
     try {
       const hash = await hashFile(file).catch(() => "");
       if (hash && (await savedPrep(hash))) return;
@@ -211,6 +213,8 @@ export default function App() {
     } catch (e) {
       pushLog("[정리] 아트웍 분석 실패(원본 그대로 진행): " +
         String((e as Error).message || e));
+    } finally {
+      setPrepPending(false);
     }
   };
 
@@ -277,6 +281,7 @@ export default function App() {
     await addFiles(id, which, [f], setName);
   };
   const anyConverting = Object.values(converting).some(Boolean);
+  const editingLocked = running || anyConverting || prepPending || prepBusy || !!prepAsk;
   const addPair = () =>
     setPairs((ps) => [...ps, { id: ++pairSeq, ref: [], test: [] }]);
   const removePair = (id: number) =>
@@ -1422,6 +1427,16 @@ export default function App() {
       {gnb}
       {adminModal}
       {prepModal}
+      {(prepPending || prepBusy) && (
+        <div className="modal-back prep-wait" role="status" aria-live="polite">
+          <div className="prep-wait-card">
+            <span className="spin" />
+            <h3>{prepPending ? "원본 데이터 확인 중…" : "원본 데이터 정제 적용 중…"}</h3>
+            <p>처리가 끝날 때까지 다른 세트의 파일 입력을 잠시 잠급니다.<br />
+               이 창은 완료되면 자동으로 닫힙니다.</p>
+          </div>
+        </div>
+      )}
       {/* 검수 중에는 페이지 전체를 잠근다 — 버튼·드롭존이 실제로 비활성일 뿐
           아니라 마우스 커서도 '클릭 불가'로 바뀌어 한눈에 알 수 있게 한다. */}
       <div className={"shell" + (running ? " locked" : "")}>
@@ -1533,20 +1548,20 @@ export default function App() {
                                     "찍혀 있으면 켜세요. 샘플 위치를 자동으로 " +
                                     "찾아 샘플별로 나눠 검수합니다."}>
                         <input type="checkbox" checked={!!p.multi}
-                               disabled={running}
+                               disabled={editingLocked}
                                onChange={(e) => setPairs((ps) => ps.map((x) =>
                                  x.id === p.id
                                    ? { ...x, multi: e.target.checked } : x))} />
                         {" "}다중 샘플
                       </label>
                       {pairs.length > 1 && (
-                        <button type="button" className="rm" disabled={running}
+                        <button type="button" className="rm" disabled={editingLocked}
                                 onClick={() => removePair(p.id)}>삭제</button>
                       )}
                     </div>
                     <div className="pairzones">
                       <MultiDropZone label="① 원본" entries={p.ref}
-                        busy={!!converting[`${p.id}:ref`]} disabled={running}
+                        busy={!!converting[`${p.id}:ref`]} disabled={editingLocked}
                         onAdd={(fs) => addFiles(p.id, "ref", fs)}
                         onRemove={(n) => removeEntry(p.id, "ref", n)}
                         onReorder={(f, t) => reorderEntry(p.id, "ref", f, t)}
@@ -1555,7 +1570,7 @@ export default function App() {
                         label={p.multi ? "② 인쇄물 (샘플 여러 개 스캔 1장)"
                                        : "② 인쇄물"}
                         entries={p.test}
-                        busy={!!converting[`${p.id}:test`]} disabled={running}
+                        busy={!!converting[`${p.id}:test`]} disabled={editingLocked}
                         onAdd={(fs) => addFiles(p.id, "test", fs)}
                         onRemove={(n) => removeEntry(p.id, "test", n)}
                         onReorder={(f, t) => reorderEntry(p.id, "test", f, t)}
@@ -1577,14 +1592,14 @@ export default function App() {
                   </div>
                 );
               })}
-              <button type="button" className="add card" disabled={running}
+              <button type="button" className="add card" disabled={editingLocked}
                       onClick={addPair}>
                 + 세트 추가
               </button>
             </div>
             <div className="card runbar">
               <label className="opt">
-                <input type="checkbox" checked={useOcr} disabled={running}
+                <input type="checkbox" checked={useOcr} disabled={editingLocked}
                        onChange={(e) => setUseOcr(e.target.checked)} />{" "}
                 OCR 텍스트 대조 사용
               </label>
@@ -1598,7 +1613,7 @@ export default function App() {
                       : undefined
               }>
                 <button className="go wide"
-                        disabled={!allComplete || running || anyConverting}
+                        disabled={!allComplete || editingLocked}
                         onClick={run}>
                   검수 시작{pairs.length > 1 ? ` (${pairs.length}세트)` : ""}
                 </button>

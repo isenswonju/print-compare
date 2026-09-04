@@ -116,6 +116,11 @@ describe("mapDisplay", () => {
     const d = mapDisplay(finding({ id: 1, type: "faded", note: "" }));
     expect(d!.note).toBe("인쇄 농도 부족(옅게 인쇄됨)");
   });
+  it("질감 억제 후보는 결함이 아니라 재확인 필요로 표시", () => {
+    expect(mapDisplay(finding({ id: 1, type: "texture_review",
+      severity: "expected", note: "질감 후보" })))
+      .toEqual({ ktype: "재확인 필요", severity: "minor", note: "질감 후보" });
+  });
   it("showthrough·trim_mark는 표시 제외(null)", () => {
     expect(mapDisplay(finding({ id: 1, type: "showthrough" }))).toBeNull();
     expect(mapDisplay(finding({ id: 1, type: "trim_mark_expected" }))).toBeNull();
@@ -140,6 +145,8 @@ describe("computeDefects", () => {
     finding({ id: 5, type: "text_mismatch", severity: "critical",
               bbox_ref: [100, 100, 20, 20], note: "OCR 불일치: a→b" }),
     finding({ id: 6, type: "missing", severity: "expected", bbox_ref: [400, 0, 10, 10] }),
+    finding({ id: 7, type: "texture_review", severity: "expected",
+              bbox_ref: [500, 0, 10, 10] }),
   ];
   const defects = computeDefects(findings);
 
@@ -151,8 +158,11 @@ describe("computeDefects", () => {
     expect(defects.map((d) => d.id)).not.toContain(4);
     expect(defects.map((d) => d.id)).not.toContain(6);
   });
-  it("남는 결함은 id 1,3,5 (심각도→id 순)", () => {
-    expect(defects.map((d) => d.id)).toEqual([1, 3, 5]);
+  it("질감 억제 후보는 expected여도 재확인 대상으로 보존", () => {
+    expect(defects.find((d) => d.id === 7)?.disp.ktype).toBe("재확인 필요");
+  });
+  it("남는 항목은 결함 1,3,5와 재확인 7 (심각도→id 순)", () => {
+    expect(defects.map((d) => d.id)).toEqual([1, 3, 5, 7]);
   });
   it("각 결함에 표시 매핑(disp)이 붙는다", () => {
     expect(defects.find((d) => d.id === 5)!.disp.ktype).toBe("인쇄 오류");

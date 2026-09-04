@@ -180,11 +180,9 @@ export function OverlayInspector({ annotated, refCanvas, alignedCanvas, defects,
     const f = hitDefect(X, Y);
     annotated.style.cursor = f ? "pointer" : "crosshair";
     if (!f) return hide();
-    // 확대경은 결함 영역에서만 — 해당 결함 중심 기준으로 표시, 검출 영역 점선
-    const [x, y, w, h] = f.bbox_ref;
-    const cx = x + w / 2, cy = y + h / 2;
-    drawLensInto(refCanvas, refLens.current, cx, cy, f.bbox_ref);
-    drawLensInto(alignedCanvas, testLens.current, cx, cy, f.bbox_ref);
+    // 결함 위에서 커서를 움직이면 확대 시야도 같은 좌표를 따라간다.
+    drawLensInto(refCanvas, refLens.current, X, Y, f.bbox_ref);
+    drawLensInto(alignedCanvas, testLens.current, X, Y, f.bbox_ref);
     const p = panel.current!;
     p.style.display = "block";
     p.style.left = (px > rect.width / 2 ? px - LENS_W - 40 : px + 24) + "px";
@@ -317,14 +315,16 @@ export function ResultDetail({ item, onOpenModal }: {
   if (!result || !defects || !annotated || !refCanvas || !alignedCanvas)
     return null;
   const fb: SetFb = item.fb || { defects: {}, missed: [] };
-  const n = sevCounts(defects);
+  const reviews = defects.filter((f) => f.type === "texture_review");
+  const confirmed = defects.filter((f) => f.type !== "texture_review");
+  const n = sevCounts(confirmed);
   const base = item.name.replace(/[^\w가-힣.-]+/g, "_");
 
   return (
     <div>
       <p className="summary">
-        {defects.length ? (
-          <>결함 <b className="bad">{defects.length}건</b> 검출
+        {confirmed.length ? (
+          <>결함 <b className="bad">{confirmed.length}건</b> 검출
             {" ("}
             {(["critical", "major", "minor"] as const)
               .filter((s) => n[s] > 0)
@@ -333,7 +333,8 @@ export function ResultDetail({ item, onOpenModal }: {
             {")"}</>
         ) : (
           <b className="ok">결함이 검출되지 않았습니다.</b>
-        )}{" "}
+        )}
+        {reviews.length > 0 && <> · 재확인 필요 <b>{reviews.length}건</b></>}{" "}
         · 분석 {((result.wallMs ?? 0) / 1000).toFixed(1)}초
       </p>
       <p className="dl">
@@ -358,7 +359,8 @@ export function ResultDetail({ item, onOpenModal }: {
                   <td>{f.id}</td>
                   <td>{f.disp.ktype}</td>
                   <td><span className={"sev " + f.disp.severity}>
-                    {f.disp.severity.toUpperCase()}</span></td>
+                    {f.type === "texture_review" ? "확인" : f.disp.severity.toUpperCase()}
+                  </span></td>
                   <td>{f.disp.note}</td>
                   <td>{v ? (
                     <><span className={"fbbadge" + (v.fp ? " fp" : "")}>
@@ -372,9 +374,9 @@ export function ResultDetail({ item, onOpenModal }: {
       )}
       <h2>결함 위치 오버레이</h2>
       <p className="note">
-        결함(빨간 박스) 위에 마우스를 올리면 확대되고, 클릭하면 오탐 피드백을
-        남길 수 있습니다. 검수기가 못 잡은 곳은 그 위치를 클릭해 미검출
-        피드백을 남겨주세요.
+        결함(빨간 박스)이나 재확인 후보(주황 박스) 위에 마우스를 올리면 커서를
+        따라 확대되고, 클릭하면 피드백을 남길 수 있습니다. 검수기가 못 잡은
+        곳은 그 위치를 클릭해 미검출 피드백을 남겨주세요.
       </p>
       <OverlayInspector
         annotated={annotated} refCanvas={refCanvas}

@@ -99,6 +99,9 @@ const dispLegibility: Disp =
 
 export function mapDisplay(f: Finding): Disp | null {
   switch (f.type) {
+    case "texture_review":
+      return { ktype: "재확인 필요", severity: "minor",
+               note: f.note || "인쇄 질감 영향 가능성 — 확대해서 재확인" };
     case "extra": {
       // 글자 잉크 접촉 실측(touch_text_px)이 있으면 그것으로, 없으면(구버전
       // 결과) 종전 severity 근사로 가른다.
@@ -160,7 +163,8 @@ export function computeDefects(findings: Finding[]): DispFinding[] {
     textBoxes.some((t) => boxesIntersect(f.bbox_ref, t));
 
   return findings
-    .filter((f) => f.severity !== "expected" && !dupOfText(f))
+    .filter((f) => (f.severity !== "expected" || f.type === "texture_review") &&
+                   !dupOfText(f))
     .map((f) => ({ ...f, disp: mapDisplay(f)! }))
     .filter((f) => f.disp)
     .sort((a, b) =>
@@ -174,6 +178,8 @@ export function buildDisplayArtifacts(
 ): DisplayArtifacts {
   const defects = computeDefects(findings);
   const redIds = new Set(defects.map((f) => f.id));
+  const reviewIds = new Set(defects.filter((f) => f.type === "texture_review")
+    .map((f) => f.id));
 
   const scale = 0.45;
   const annotated = document.createElement("canvas");
@@ -190,7 +196,7 @@ export function buildDisplayArtifacts(
       ctx.lineWidth = 2;
       ctx.strokeRect(x, y, w, h);
     } else {
-      ctx.strokeStyle = "red";
+      ctx.strokeStyle = reviewIds.has(f.id) ? "#f59e0b" : "red";
       ctx.lineWidth = 4;
       ctx.strokeRect(x, y, w, h);
       // 번호는 영역(빨강)과 구분되는 파란색 + 흰 테두리 — 혼동 방지

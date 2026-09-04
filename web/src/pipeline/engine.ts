@@ -217,6 +217,7 @@ export async function runPipeline(
   const nExtraAll = extraComps.length, nMissingAll = missingComps.length;
   extraComps = splitReflow(extraComps, normTest, ref, rawExtra, refInkDil);
   missingComps = splitReflow(missingComps, ref, normTest, rawMissing, testInkDil);
+  const textureReview: Comp[] = [];
 
   // ------------------------------------------------------------ 3.5c 질감 존 억제
   // 번짐·흐릿 인쇄 지역의 소형 diff 는 결함이 아니라 인쇄 품질 저하다.
@@ -264,10 +265,16 @@ export async function runPipeline(
       return specks >= speckThresh;
     };
     let nTz = 0;
-    extraComps = extraComps.filter((c) => inTextureZone(c, true) ? (++nTz, false) : true);
-    missingComps = missingComps.filter((c) => inTextureZone(c, false) ? (++nTz, false) : true);
+    extraComps = extraComps.filter((c) => {
+      if (!inTextureZone(c, true)) return true;
+      nTz++; textureReview.push(c); return false;
+    });
+    missingComps = missingComps.filter((c) => {
+      if (!inTextureZone(c, false)) return true;
+      nTz++; textureReview.push(c); return false;
+    });
     rawAll.delete();
-    if (nTz) log(`[질감] 번짐/흐릿 존 소형 diff 억제 ${nTz}건`);
+    if (nTz) log(`[질감] 번짐/흐릿 존 소형 diff 재확인 분리 ${nTz}건`);
   }
 
   // 원시 diff 마스크는 여기까지 — 뒷비침 단계가 큰 버퍼를 잡기 전에 비워준다.
@@ -276,6 +283,12 @@ export async function runPipeline(
 
   const findings: WorkFinding[] = [];
   const minAreaEff = cfg.minArea * (ref.cols / REF_BASE_WIDTH) ** 2;
+  // 질감 억제 후보를 버리지 않는다. 결함 판정에는 포함하지 않되 화면의
+  // '재확인 필요' 계층에 남겨 작은 실제 결함이 완전히 사라지는 일을 막는다.
+  for (const c of textureReview)
+    findings.push({ type: "texture_review", severity: "expected",
+                    bbox: c.bbox, area: c.area,
+                    note: "인쇄 질감 영향 가능성 — 확대해서 재확인" });
   for (const c of extraComps)
     findings.push({ type: "extra", bbox: c.bbox, area: c.area, note: "",
                     metrics: areaMargin(c.area, minAreaEff) });
@@ -1252,7 +1265,8 @@ function ruledBoxMask(cv: CV, refInk: Mat,
 
 function classifySeverity(f: WorkFinding, refWords: Word[],
                           revLines: BBox[], boxMask: Mat): string {
-  if (f.type === "trim_mark_expected" || f.type === "layout_reflow")
+  if (f.type === "trim_mark_expected" || f.type === "layout_reflow" ||
+      f.type === "texture_review")
     return "expected";
   if (f.type === "text_mismatch") return "critical";
   for (const lb of revLines) if (boxesIntersect(f.bbox, lb)) return "critical";

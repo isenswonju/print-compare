@@ -1383,9 +1383,15 @@ export default function App() {
                                   className={"pagetab" + (gi === selected ? " on" : "")}
                                   onClick={() => setSelected(gi)}>
                             {pageLabel(item)}
-                            {item.error ? " ⚠"
-                              : item.defects?.length ? ` · 결함 ${item.defects.length}`
-                                : " · 정상"}
+                            {item.error ? " ⚠" : (() => {
+                              const confirmed = item.defects?.filter(
+                                (f) => f.type !== "texture_review").length ?? 0;
+                              const review = item.defects?.filter(
+                                (f) => f.type === "texture_review").length ?? 0;
+                              if (confirmed) return ` · 결함 ${confirmed}`;
+                              if (review) return ` · 재확인 ${review}`;
+                              return " · 정상";
+                            })()}
                           </button>
                         ))}
                       </div>

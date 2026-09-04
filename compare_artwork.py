@@ -904,7 +904,7 @@ def ruled_box_mask(ref_ink: np.ndarray) -> np.ndarray:
 
 def classify_severity(f: Finding, ref_words: list[dict],
                       rev_lines: list[tuple], box_mask: np.ndarray) -> str:
-    if f.type in ("trim_mark_expected", "layout_reflow"):
+    if f.type in ("trim_mark_expected", "layout_reflow", "texture_review"):
         return "expected"
     if f.type == "text_mismatch":
         return "critical"
@@ -1286,20 +1286,28 @@ def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
         return specks >= speck_thresh
 
     n_tz = 0
+    texture_review = []
     kept_e, kept_m = [], []
     for comps, kept, is_extra in ((extra_comps, kept_e, True),
                                   (missing_comps, kept_m, False)):
         for c in comps:
             if in_texture_zone(c, is_extra):
                 n_tz += 1
+                texture_review.append(c)
             else:
                 kept.append(c)
     extra_comps, missing_comps = kept_e, kept_m
     if n_tz:
-        print(f"[질감] 번짐/흐릿 존 소형 diff 억제 {n_tz}건")
+        print(f"[질감] 번짐/흐릿 존 소형 diff 재확인 분리 {n_tz}건")
 
     findings: list[Finding] = []
     min_area_eff = cfg.min_area * (ref.shape[1] / REF_BASE_WIDTH) ** 2
+    # 억제 후보를 버리지 않고 비결함 '재확인 필요' 계층으로 보존한다.
+    for c in texture_review:
+        findings.append(Finding(
+            type="texture_review", severity="expected",
+            bbox_ref=c["bbox"], area_px=c["area"],
+            note="인쇄 질감 영향 가능성 — 확대해서 재확인"))
     for c in extra_comps:
         findings.append(Finding(type="extra", bbox_ref=c["bbox"], area_px=c["area"],
                                 metrics=area_margin(c["area"], min_area_eff)))

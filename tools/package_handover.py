@@ -34,6 +34,7 @@ NEVER = {
     "backend/.env.local",
 }
 ACCOUNT_SHEET = ROOT.parent / "인수인계-계정.txt"
+ARCHIVE_ROOT = "print-compare"
 
 
 def skipped(rel: str) -> bool:
@@ -88,17 +89,18 @@ def main(argv: list[str] | None = None) -> int:
 
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for i, f in enumerate(files, 1):
-            z.write(f, f.relative_to(ROOT).as_posix())
+            rel = f.relative_to(ROOT).as_posix()
+            z.write(f, f"{ARCHIVE_ROOT}/{rel}")
             if i % 2000 == 0:
                 print(f"   … {i:,}/{len(files):,}")
         if ACCOUNT_SHEET.exists():
-            z.write(ACCOUNT_SHEET, "인수인계-계정.txt")
+            z.write(ACCOUNT_SHEET, f"{ARCHIVE_ROOT}/인수인계-계정.txt")
 
     size = dest.stat().st_size
     print(f"\n[완료] {dest.name}  ({size / 1e6:,.0f}MB)")
 
     print("\n받는 쪽 안내:")
-    print("  1) 경로에 한글·띄어쓰기 없는 폴더에 압축을 푼다 (예: C:\\print-compare)")
+    print("  1) C:\\ 같은 경로에 압축을 푼다 → C:\\print-compare 로 만들어진다")
     print("  2) 설치.bat 더블클릭 → 브라우저 로그인 창만 승인")
     print("  3) 결과가 전부 [완료]이면 이후에는 시작.bat만 더블클릭")
 

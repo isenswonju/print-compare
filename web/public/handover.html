@@ -468,8 +468,9 @@
       <li>
         <h3>압축 풀기</h3>
         <p>
-          전달받은 압축 파일을 <b>경로에 한글이나 띄어쓰기가 없는 폴더</b>에 푸세요.
-          예: <code>C:\print-compare</code>
+          전달받은 압축 파일을 <code>C:\</code> 같은 경로에 푸세요. 압축 안의
+          최상위 폴더가 <code>print-compare</code>이므로 자동으로
+          <code>C:\print-compare</code>가 됩니다.
         </p>
         <p>
           바탕화면이나 <code>다운로드</code> 폴더에 그냥 풀면 일부 도구가 경로를 못
@@ -524,6 +525,14 @@
         <p><span class="say">이 프로젝트가 무엇을 하는 도구인지, 최근에 무엇이 바뀌었는지 비개발자가 이해할 수 있게 설명해줘.</span></p>
       </li>
     </ol>
+
+    <div class="note">
+      <b>두 명이 관리한다면</b> 두 사람 모두 각자의 PC에서 <code>설치.bat</code>을
+      한 번씩 실행하세요. GitHub는 같은 <code>isenswonju</code> 계정으로 로그인해도
+      작동하고, 설치 프로그램이 각 PC의 Windows 사용자명을 변경 기록에 남깁니다.
+      Codex는 각자의 개인 계정을 사용해도 됩니다. 다만 같은 요청을 동시에 수정하면
+      충돌할 수 있으므로 한 사람이 작업을 마친 다음 다른 사람이 시작하세요.
+    </div>
 
     <div class="note">
       <b>규칙은 이미 들어 있습니다.</b> 폴더 안의 <code>AGENTS.md</code> 파일에

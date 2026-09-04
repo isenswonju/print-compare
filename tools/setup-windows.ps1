@@ -161,7 +161,8 @@ Head "7/8  회사 저장소와 자동 배포 확인"
 if (Has "git") {
   git config core.hooksPath hooks
   git remote set-url origin https://github.com/isenswonju/print-compare.git 2>$null
-  git config user.name isenswonju
+  # 같은 회사 GitHub 계정을 함께 써도 어느 PC에서 만든 변경인지 기록에 남긴다.
+  git config user.name "I-SENS 담당자 ($env:USERNAME)"
   git config user.email isenswonju@gmail.com
   Write-Host "  저장 전 자동 검사를 켰습니다." -ForegroundColor Green
   $ok += "저장 전 자동 검사"

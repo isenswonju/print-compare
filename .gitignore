@@ -14,6 +14,8 @@ __pycache__/
 # OS · 에디터
 .DS_Store
 *.log
+# AI 코딩 도구의 PC별 로컬 설정(권한 허용목록 등) — 사람마다 다르다
+.claude/settings.local.json
 
 # 런타임 수집 데이터(개인/의료 라벨 데이터일 수 있어 커밋 금지)
 feedback/*.jsonl

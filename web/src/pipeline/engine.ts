@@ -187,20 +187,23 @@ export async function runPipeline(
     if (corr < cfg.reflowMinCorr) return false;
     const [x, y, w, h] = bbox;
     const sub = matRect(cv, diffMask, x, y, w, h);
-    const pts: [number, number][] = [];
-    for (let yy = 0; yy < h; yy++)
-      for (let xx = 0; xx < w; xx++)
-        if (sub[yy * w + xx]) pts.push([xx, yy]);
-    if (!pts.length) return true;
     const hh = dstInkDil.rows, ww = dstInkDil.cols;
     const d = dstInkDil.data;
-    let covered = 0;
-    for (const [xx, yy] of pts) {
-      const cyy = Math.min(Math.max(yy + y + dy, 0), hh - 1);
-      const cxx = Math.min(Math.max(xx + x + dx, 0), ww - 1);
-      if (d[cyy * ww + cxx] > 0) covered++;
+    // 좌표 목록을 따로 만들지 않고 바로 센다 — 큰 덩어리에서 [x,y] 배열
+    // 수백만 개가 JS 힙을 그대로 먹었다(판정 결과는 동일).
+    let total = 0, covered = 0;
+    for (let yy = 0; yy < h; yy++) {
+      const row = yy * w;
+      const cyy = Math.min(Math.max(yy + y + dy, 0), hh - 1) * ww;
+      for (let xx = 0; xx < w; xx++) {
+        if (!sub[row + xx]) continue;
+        total++;
+        const cxx = Math.min(Math.max(xx + x + dx, 0), ww - 1);
+        if (d[cyy + cxx] > 0) covered++;
+      }
     }
-    return covered / pts.length >= cfg.reflowMinCover;
+    if (!total) return true;
+    return covered / total >= cfg.reflowMinCover;
   };
 
   const reflowBoxes: BBox[] = [];
@@ -989,9 +992,17 @@ function inMargin([x, y, bw, bh]: BBox, ref: Mat, ratio: number): boolean {
 // --------------------------------------------------------------------------
 // 3.5b 리플로우 — 문맥 포함 템플릿 매칭
 // --------------------------------------------------------------------------
-function findShiftedMatch(cv: CV, src: Mat, dst: Mat, bbox: BBox, pad: number,
-                          searchX: number, searchY: number,
-                          excludeR: number): [number, number, number] {
+// 템플릿 매칭 검색창의 픽셀 상한 — 이보다 크면 매칭하지 않는다.
+// 600만 px 이면 적분영상(CV_64F) 두 장이 96MB 로, 대형 라벨의 다른 단계 피크와
+// 겹쳐도 1GB 힙 안에 들어온다. 기준폭(5564) 환산으로 2400x2500 짜리 덩어리라
+// 정상적인 리플로우(글줄 이동)는 전부 이 안에 들어온다.
+export const REFLOW_MAX_WIN_PX = 6_000_000;
+
+export function findShiftedMatch(
+  cv: CV, src: Mat, dst: Mat, bbox: BBox, pad: number,
+  searchX: number, searchY: number,
+  excludeR: number,
+): [number, number, number] {
   const [x, y, w, h] = bbox;
   const hh = src.rows, ww = src.cols;
   const tx0 = Math.max(x - pad, 0), ty0 = Math.max(y - pad, 0);
@@ -1000,6 +1011,14 @@ function findShiftedMatch(cv: CV, src: Mat, dst: Mat, bbox: BBox, pad: number,
   const wx0 = Math.max(tx0 - searchX, 0), wy0 = Math.max(ty0 - searchY, 0);
   const wx1 = Math.min(tx1 + searchX, ww), wy1 = Math.min(ty1 + searchY, hh);
   if (wy1 - wy0 < ty1 - ty0 || wx1 - wx0 < tx1 - tx0) return [-1.0, 0, 0];
+  // 검색창이 페이지만 해지면 매칭을 포기한다. matchTemplate(TM_CCOEFF_NORMED)은
+  // 검색창의 적분영상을 CV_64F(픽셀당 8바이트)로 두 장 잡아서, 창이 커지면
+  // 한 장이 그대로 수백 MB가 되고 1GB wasm 힙이 터진다 — 실제 사고(2026-09-07,
+  // 사용자 PC 5세트 전건 실패): "Failed to allocate 429922944 bytes"는
+  // 11308x4751 창의 적분영상 한 장이다. 리플로우는 '글줄이 밀린' 국소 현상이라
+  // 이만한 덩어리는 애초에 리플로우 후보가 아니다(정합 실패로 페이지 전체가
+  // diff 로 잡힌 경우) — 억제하지 않고 결함으로 남겨 사람이 보게 한다.
+  if ((wx1 - wx0) * (wy1 - wy0) > REFLOW_MAX_WIN_PX) return [-1.0, 0, 0];
 
   const tmpl = src.roi(new cv.Rect(tx0, ty0, tx1 - tx0, ty1 - ty0));
   const win = dst.roi(new cv.Rect(wx0, wy0, wx1 - wx0, wy1 - wy0));

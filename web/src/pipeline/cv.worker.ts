@@ -44,6 +44,19 @@ function heapMB(): string {
   return buf ? `${(buf.byteLength / 1024 / 1024).toFixed(0)}MB` : "?";
 }
 
+// 메모리 부족은 원문(영어 OpenCV 메시지)을 그대로 보여줘도 사용자가 할 수 있는
+// 일이 없다. 무엇이 부족했고 무엇을 하면 되는지로 바꿔준다.
+function outOfMemoryMsg(detail: string): string | null {
+  if (!/Insufficient memory|Failed to allocate|bad_alloc|out of memory/i
+        .test(detail)) return null;
+  const m = /Failed to allocate (\d+) bytes/.exec(detail);
+  const need = m ? ` (${Math.round(Number(m[1]) / 1048576)}MB 확보 실패)` : "";
+  return `메모리가 부족해 분석을 마치지 못했습니다${need} ` +
+         `[단계: ${lastStage}, 사용 중 ${heapMB()}]. 이미지 해상도가 너무 ` +
+         `높을 때 주로 생깁니다 — 600dpi로 다시 만들어 올리거나, 다른 탭·` +
+         `프로그램을 닫고 세트를 나눠 다시 시도해주세요.`;
+}
+
 // wasm에서 올라온 예외를 사람이 읽을 수 있는 문장으로.
 function describeError(err: unknown): string {
   const cv = ctx.cv as unknown as
@@ -53,15 +66,18 @@ function describeError(err: unknown): string {
     try {
       const ex = cv?.exceptionFromPtr?.(err);
       const detail = ex?.msg || ex?.err;
-      if (detail) return `OpenCV 오류(${err}) — ${detail} [단계: ${lastStage}]`;
+      if (detail)
+        return outOfMemoryMsg(detail) ||
+               `OpenCV 오류(${err}) — ${detail} [단계: ${lastStage}]`;
     } catch { /* 아래 일반 문구로 */ }
     return `OpenCV 내부 오류(코드 ${err}) — 단계: ${lastStage}. ` +
            `이미지가 너무 크거나 손상됐을 때 주로 발생합니다.`;
   }
   // 2) 메모리 부족(대형 라벨에서 흔함)은 따로 짚어준다.
   const msg = String((err as Error)?.message || err);
-  if (/out of memory|Cannot enlarge|allocat/i.test(msg))
-    return `메모리 부족으로 분석을 마치지 못했습니다 [단계: ${lastStage}] — ${msg}`;
+  if (/Cannot enlarge/i.test(msg) || outOfMemoryMsg(msg))
+    return outOfMemoryMsg(msg) ||
+           `메모리가 부족해 분석을 마치지 못했습니다 [단계: ${lastStage}] — ${msg}`;
   return `${msg} [단계: ${lastStage}]`;
 }
 

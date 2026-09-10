@@ -615,6 +615,17 @@ details summary { cursor: pointer; }
 .lib-tools button:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
 .lib-tools button:disabled { opacity: 0.4; cursor: default; }
 /* 연결 상태 표기 — 버튼과 같은 높이의 잔잔한 라벨 */
+.library-search { display: flex; gap: 4px; margin: 0 0 8px; }
+.library-search input {
+  flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px;
+  padding: 5px 7px; font: inherit; font-size: 0.78rem;
+}
+.library-search input:focus { outline: 2px solid #ffd9d5; border-color: var(--red); }
+.library-search button {
+  border: 0; background: none; color: var(--muted); cursor: pointer;
+  padding: 2px 6px; font-size: 1rem; line-height: 1;
+}
+.library-search button:hover { color: var(--red); }
 .lib-sync-state { flex: 2; min-width: 0; font-size: 0.72rem; color: var(--muted);
   padding: 4px 2px; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }

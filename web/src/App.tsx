@@ -77,6 +77,7 @@ export default function App() {
   const [addingSection, setAddingSection] = useState(false);
   const [sectionDraft, setSectionDraft] = useState("");
   const [editingSection, setEditingSection] = useState<string | null>(null);
+  const [libraryQuery, setLibraryQuery] = useState("");
   const [libStatus, setLibStatus] = useState(""); // 서버 동기화 안내
   const [hoverTip, setHoverTip] = useState(""); // 버튼 호버 설명
   // 공용 보관함 — 연결 절차·비밀번호 없음. 앱을 열면 곧바로 서버와 맞춘다.
@@ -491,6 +492,17 @@ export default function App() {
     </div>
   );
 
+  // 검색은 보관함 목록을 바꾸지 않고 화면에서만 파일명으로 거른다.
+  // 일치한 파일의 상위 폴더는 함께 남겨, 파일이 있던 위치를 알 수 있게 한다.
+  const normalizedLibraryQuery = libraryQuery.trim().toLocaleLowerCase();
+  const matchesLibraryQuery = (a: ArtworkEntry) =>
+    !normalizedLibraryQuery ||
+    a.name.toLocaleLowerCase().includes(normalizedLibraryQuery);
+  const sectionHasSearchMatch = (sectionId: string): boolean =>
+    recent.some((a) => a.section === sectionId && matchesLibraryQuery(a)) ||
+    sections.some((s) => s.parentId === sectionId && sectionHasSearchMatch(s.id));
+  const hasLibrarySearchResults = recent.some(matchesLibraryQuery);
+
   // 드롭 대상(폴더/미분류) 공통 핸들러. 받는 것은 세 가지다.
   //  1) 보관함 원본(text/hash)     — 그 폴더로 분류 이동
   //  2) 폴더(text/section)         — 그 폴더의 하위로 이동
@@ -522,8 +534,11 @@ export default function App() {
   // 자식 폴더는 부모가 펼쳐졌을 때만 보인다. 폴더 자체도 드래그해 옮길 수 있다.
   const renderSection = (s: Section, depth: number): React.ReactNode => {
     const arts = recent.filter((a) => a.section === s.id);
-    const children = sections.filter((c) => c.parentId === s.id);
-    const isOpen = !!expanded[s.id];
+    const visibleArts = arts.filter(matchesLibraryQuery);
+    const children = sections.filter((c) => c.parentId === s.id &&
+      (!normalizedLibraryQuery || sectionHasSearchMatch(c.id)));
+    // 검색 중에는 일치 결과까지의 경로를 자동으로 펼친다. 기존 펼침 상태는 건드리지 않는다.
+    const isOpen = !!normalizedLibraryQuery || !!expanded[s.id];
     const isSel = selectedSection === s.id;
     return (
       <div className={"sec-group" +
@@ -559,7 +574,7 @@ export default function App() {
                   onClick={() => !running &&
                     setSelectedSection((cur) => (cur === s.id ? null : s.id))}
                   onDoubleClick={() => !running && setEditingSection(s.id)}>
-              📁 {s.name} <span className="sec-count">{arts.length}</span>
+              📁 {s.name} <span className="sec-count">{visibleArts.length}</span>
               {children.length > 0 &&
                 <span className="sec-count">· {children.length}폴더</span>}
             </span>
@@ -575,8 +590,8 @@ export default function App() {
         {isOpen && (
           <>
             {children.map((c) => renderSection(c, depth + 1))}
-            {arts.map((a) => renderArtwork(a, depth + 1))}
-            {arts.length === 0 && children.length === 0 && (
+            {visibleArts.map((a) => renderArtwork(a, depth + 1))}
+            {visibleArts.length === 0 && children.length === 0 && !normalizedLibraryQuery && (
               <div className="sec-empty">여기로 파일이나 폴더를 끌어놓으세요</div>
             )}
           </>
@@ -1478,6 +1493,19 @@ export default function App() {
                   동기화</button>
               </div>
             )}
+            <div className="library-search">
+              <input type="search" value={libraryQuery}
+                     aria-label="보관함 파일 이름 검색"
+                     placeholder="파일 이름 검색"
+                     onChange={(e) => setLibraryQuery(e.target.value)}
+                     onKeyDown={(e) => {
+                       if (e.key === "Escape") setLibraryQuery("");
+                     }} />
+              {libraryQuery && (
+                <button type="button" onClick={() => setLibraryQuery("")}
+                        aria-label="파일 이름 검색 지우기">×</button>
+              )}
+            </div>
             <div className="lib-tip-anchor">
               {hoverTip && <p className="lib-tip" role="tooltip">{hoverTip}</p>}
             </div>
@@ -1514,20 +1542,26 @@ export default function App() {
                   폴더로 정리할 수 있어요.
                 </p>
               )}
+              {normalizedLibraryQuery && !hasLibrarySearchResults && (
+                <p className="artlib-empty">“{libraryQuery.trim()}”와(과) 일치하는 파일이 없습니다.</p>
+              )}
               {/* 최상위 폴더부터 재귀 렌더(하위는 renderSection 안에서) */}
               {sections.filter((s) => !s.parentId ||
                 !sections.some((p) => p.id === s.parentId))
+                .filter((s) => !normalizedLibraryQuery || sectionHasSearchMatch(s.id))
                 .map((s) => renderSection(s, 0))}
               {/* 미분류 — 폴더가 있으면 항상 표시(드롭으로 되돌릴 수 있게) */}
               {(() => {
                 const unfiled = recent.filter((a) =>
-                  !a.section || !sections.some((s) => s.id === a.section));
+                  (!a.section || !sections.some((s) => s.id === a.section)) &&
+                  matchesLibraryQuery(a));
                 if (unfiled.length === 0 && sections.length === 0) return null;
                 return (
                   <div className="sec-group">
-                    {sections.length > 0 && <div className="sec-head plain">미분류</div>}
+                    {sections.length > 0 && unfiled.length > 0 &&
+                      <div className="sec-head plain">미분류</div>}
                     {unfiled.map((a) => renderArtwork(a))}
-                    {unfiled.length === 0 && sections.length > 0 && (
+                    {unfiled.length === 0 && sections.length > 0 && !normalizedLibraryQuery && (
                       <div className="sec-empty">여기로 드래그하면 분류 해제</div>
                     )}
                   </div>

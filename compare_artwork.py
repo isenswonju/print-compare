@@ -248,18 +248,26 @@ def global_align(ref: np.ndarray, test: np.ndarray, cfg: Config) -> np.ndarray:
     src = np.float32([kp_t[m.queryIdx].pt for m in good]) / s_test
     dst = np.float32([kp_r[m.trainIdx].pt for m in good]) / s_ref
 
-    # 재투영 허용치는 **특징점을 검출한 해상도** 기준이어야 한다. 좌표는 위에서
-    # 원본 해상도로 되돌렸으므로(/s_ref, /s_test), 축소배율만큼 늘려 준다.
-    # 그러지 않으면 600dpi 5564px 라벨에서 축소배율 0.28 → 검출 해상도 1px의
-    # 위치 오차가 원본 3.5px이 되어, 옳은 대응조차 3px 문턱에 걸려 탈락한다.
-    # 실측(러시아어 삽입지 스캔 2장): inlier 282·341 → 758·841, 스케일 성분은
-    # 0.995~0.998로 동일. 서로 다른 아트웍은 이 값으로도 inlier 7에 머문다.
-    H, mask = cv2.findHomography(
-        src, dst, cv2.RANSAC,
-        ransacReprojThreshold=cfg.ransac_thresh / s_ref)
+    H, mask = cv2.findHomography(src, dst, cv2.RANSAC,
+                                 ransacReprojThreshold=cfg.ransac_thresh)
     if H is None:
         raise SystemExit("[에러] homography 추정 실패.")
-    inliers = int(mask.sum())
+
+    # 검증용 inlier 수는 **특징점을 검출한 해상도** 기준으로 다시 센다.
+    # ORB는 downscale_long(2000)으로 줄인 이미지에서 점을 잡는데 좌표만 원본
+    # 해상도로 되돌리므로(/s_ref, /s_test), 축소배율 0.28짜리 600dpi 라벨에서는
+    # 검출 해상도 1px 오차가 원본 3.5px이 된다 — RANSAC 문턱 3px으로 세면
+    # **옳은 대응조차 대부분 탈락**해 inlier가 300 언저리에서 흔들리고, 같은
+    # 파일이 어떤 날은 되고 어떤 날은 "동일 아트웍인지 확인하세요"로 막혔다
+    # (실측: 러시아어 삽입지 스캔 282·341 → 759·838).
+    # H 자체는 위의 엄격한 문턱으로 그대로 추정한다 — 정합 정밀도는 건드리지
+    # 않고 판정 지표만 올바른 단위로 세기 위해서다(문턱을 풀어 H까지 바꿨더니
+    # 회귀 픽스처 pga1e0398 오탐이 1건 늘었다).
+    # 서로 다른 아트웍은 이 셈법으로도 inlier 7에 머문다 — 방어는 그대로다.
+    resid = np.linalg.norm(
+        cv2.perspectiveTransform(src.reshape(-1, 1, 2), H).reshape(-1, 2) - dst,
+        axis=1)
+    inliers = int((resid <= cfg.ransac_thresh / s_ref).sum())
 
     Hn = H / H[2, 2]
     sx = float(np.hypot(Hn[0, 0], Hn[1, 0]))

@@ -541,19 +541,31 @@ function globalAlign(cv: CV, ref: Mat, test: Mat, cfg: PipelineConfig,
   });
 
   const inlierMask = new cv.Mat();
-  // 재투영 허용치는 **특징점을 검출한 해상도** 기준이어야 한다. 좌표는 위에서
-  // 원본 해상도로 되돌렸으므로(/sRef, /sTest), 축소배율만큼 늘려 준다. 그러지
-  // 않으면 600dpi 5564px 라벨에서 축소배율 0.28 → 검출 해상도 1px의 위치
-  // 오차가 원본 3.5px이 되어, 옳은 대응조차 3px 문턱에 걸려 탈락한다. 실측
-  // (러시아어 삽입지 스캔 2장): inlier 282·341 → 758·841, 스케일 성분은
-  // 0.995~0.998로 동일. 서로 다른 아트웍은 이 값으로도 inlier 7에 머문다.
-  const H = cv.findHomography(src, dst, cv.RANSAC, cfg.ransacThresh / sRef,
-                              inlierMask);
+  const H = cv.findHomography(src, dst, cv.RANSAC, cfg.ransacThresh, inlierMask);
   if (H.empty()) throw new Error("[에러] homography 추정 실패.");
-  let inliers = 0;
-  for (let i = 0; i < inlierMask.rows; i++) if (inlierMask.data[i]) inliers++;
 
   const Hd = H.data64F;
+  // 검증용 inlier 수는 **특징점을 검출한 해상도** 기준으로 다시 센다.
+  // ORB는 downscaleLong(2000)으로 줄인 이미지에서 점을 잡는데 좌표만 원본
+  // 해상도로 되돌리므로(/sRef, /sTest), 축소배율 0.28짜리 600dpi 라벨에서는
+  // 검출 해상도 1px 오차가 원본 3.5px이 된다 — RANSAC 문턱 3px으로 세면
+  // **옳은 대응조차 대부분 탈락**해 inlier가 300 언저리에서 흔들리고, 같은
+  // 파일이 어떤 날은 되고 어떤 날은 "동일 아트웍인지 확인하세요"로 막혔다
+  // (실측: 러시아어 삽입지 스캔 282·341 → 759·838).
+  // H 자체는 위의 엄격한 문턱으로 그대로 추정한다 — 정합 정밀도는 건드리지
+  // 않고 판정 지표만 올바른 단위로 세기 위해서다(문턱을 풀어 H까지 바꿨더니
+  // 회귀 픽스처 pga1e0398 오탐이 1건 늘었다).
+  // 서로 다른 아트웍은 이 셈법으로도 inlier 7에 머문다 — 방어는 그대로다.
+  const tol = cfg.ransacThresh / sRef;
+  let inliers = 0;
+  for (let i = 0; i < good.length; i++) {
+    const x = src.data32F[i * 2], y = src.data32F[i * 2 + 1];
+    const w = Hd[6] * x + Hd[7] * y + Hd[8];
+    const ex = (Hd[0] * x + Hd[1] * y + Hd[2]) / w - dst.data32F[i * 2];
+    const ey = (Hd[3] * x + Hd[4] * y + Hd[5]) / w - dst.data32F[i * 2 + 1];
+    if (Math.hypot(ex, ey) <= tol) inliers++;
+  }
+
   const h22 = Hd[8];
   const sx = Math.hypot(Hd[0] / h22, Hd[3] / h22);
   const sy = Math.hypot(Hd[1] / h22, Hd[4] / h22);

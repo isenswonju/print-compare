@@ -167,7 +167,11 @@ def _run_web(ref: Path, test: Path, use_ocr: bool,
            "OCR_LANG_PATH": os.environ.get(
                "OCR_LANG_PATH", str(ROOT / "web" / "public" / "tesseract" / "lang"))}
     t0 = time.time()
+    # 하니스 로그는 한국어(UTF-8)다. text=True 만 주면 Windows 기본 코덱(cp949)으로
+    # 디코딩하다 죽고, 그러면 proc.stdout 이 None 이라 케이스가 통째로 FAIL 로
+    # 보인다 — 실제로는 엔진이 정상 실행된 뒤였다. 코덱을 못 박는다.
     proc = subprocess.run(cmd, cwd=ROOT / "web", capture_output=True, text=True,
+                          encoding="utf-8", errors="replace",
                           env=env, timeout=1800)
     elapsed = time.time() - t0
     if proc.returncode != 0 or not out_json.exists():

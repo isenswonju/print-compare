@@ -160,7 +160,22 @@ def console(results: list[dict]) -> None:
                 print(f"  ⚠️  [{r['case']}] {msg}")
 
 
+def use_utf8_console() -> None:
+    """콘솔 출력 코덱을 UTF-8로 고정한다.
+
+    Windows 기본 콘솔 코덱(cp949)은 리포트에 쓰는 '⚠'·'—' 같은 글자를 못 찍고
+    UnicodeEncodeError 로 죽는다 — 실제로는 9개 케이스가 전부 PASS 였는데
+    결과를 인쇄하다 죽어 pre-commit 훅이 커밋을 막았다(2026-09-09).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):  # 리다이렉트된 스트림 등
+            pass
+
+
 def main(argv=None) -> int:
+    use_utf8_console()
     ap = argparse.ArgumentParser(
         description="정확도 회귀 안전망 — 계약(FAIL) + 표류(WARN) 2층 게이트")
     ap.add_argument("--engine", default="python", choices=ENGINES)

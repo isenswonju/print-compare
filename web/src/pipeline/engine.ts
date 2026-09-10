@@ -541,7 +541,14 @@ function globalAlign(cv: CV, ref: Mat, test: Mat, cfg: PipelineConfig,
   });
 
   const inlierMask = new cv.Mat();
-  const H = cv.findHomography(src, dst, cv.RANSAC, cfg.ransacThresh, inlierMask);
+  // 재투영 허용치는 **특징점을 검출한 해상도** 기준이어야 한다. 좌표는 위에서
+  // 원본 해상도로 되돌렸으므로(/sRef, /sTest), 축소배율만큼 늘려 준다. 그러지
+  // 않으면 600dpi 5564px 라벨에서 축소배율 0.28 → 검출 해상도 1px의 위치
+  // 오차가 원본 3.5px이 되어, 옳은 대응조차 3px 문턱에 걸려 탈락한다. 실측
+  // (러시아어 삽입지 스캔 2장): inlier 282·341 → 758·841, 스케일 성분은
+  // 0.995~0.998로 동일. 서로 다른 아트웍은 이 값으로도 inlier 7에 머문다.
+  const H = cv.findHomography(src, dst, cv.RANSAC, cfg.ransacThresh / sRef,
+                              inlierMask);
   if (H.empty()) throw new Error("[에러] homography 추정 실패.");
   let inliers = 0;
   for (let i = 0; i < inlierMask.rows; i++) if (inlierMask.data[i]) inliers++;

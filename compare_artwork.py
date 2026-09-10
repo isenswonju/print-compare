@@ -248,8 +248,15 @@ def global_align(ref: np.ndarray, test: np.ndarray, cfg: Config) -> np.ndarray:
     src = np.float32([kp_t[m.queryIdx].pt for m in good]) / s_test
     dst = np.float32([kp_r[m.trainIdx].pt for m in good]) / s_ref
 
-    H, mask = cv2.findHomography(src, dst, cv2.RANSAC,
-                                 ransacReprojThreshold=cfg.ransac_thresh)
+    # 재투영 허용치는 **특징점을 검출한 해상도** 기준이어야 한다. 좌표는 위에서
+    # 원본 해상도로 되돌렸으므로(/s_ref, /s_test), 축소배율만큼 늘려 준다.
+    # 그러지 않으면 600dpi 5564px 라벨에서 축소배율 0.28 → 검출 해상도 1px의
+    # 위치 오차가 원본 3.5px이 되어, 옳은 대응조차 3px 문턱에 걸려 탈락한다.
+    # 실측(러시아어 삽입지 스캔 2장): inlier 282·341 → 758·841, 스케일 성분은
+    # 0.995~0.998로 동일. 서로 다른 아트웍은 이 값으로도 inlier 7에 머문다.
+    H, mask = cv2.findHomography(
+        src, dst, cv2.RANSAC,
+        ransacReprojThreshold=cfg.ransac_thresh / s_ref)
     if H is None:
         raise SystemExit("[에러] homography 추정 실패.")
     inliers = int(mask.sum())
@@ -1475,6 +1482,13 @@ def run_pipeline(ref_path: Path, test_path: Path, outdir: Path,
 # ---------------------------------------------------------------------------
 
 def main(argv=None):
+    # Windows 콘솔 기본 코덱(cp949)은 요약표의 '—' 를 못 찍고 죽는다 —
+    # 검사는 다 끝난 뒤 결과를 인쇄하다 죽어서 실패로 보였다.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(
         description="인쇄 아트웍(REF) vs 실물 스캔(TEST) 결함 자동 검출")
     ap.add_argument("ref", type=Path, help="승인 아트웍 PNG (REF)")
